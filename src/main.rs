@@ -1,5 +1,6 @@
 mod container;
 mod gantry_crane;
+mod settings;
 
 use gantry_crane::GantryCrane;
 

@@ -1,14 +1,18 @@
-use std::{cell::RefCell, collections::HashMap};
+use std::{cell::RefCell, collections::HashMap, time::Duration};
 
 use bollard::{
+    container::{Stats, StatsOptions},
     service::{EventActor, EventMessageTypeEnum},
     system::EventsOptions,
     Docker,
 };
-use tokio::signal::unix::{signal, SignalKind};
-use tokio_stream::StreamExt;
+use futures::{stream::FuturesUnordered, StreamExt};
+use tokio::{
+    signal::unix::{signal, SignalKind},
+    time,
+};
 
-use crate::container::Container;
+use crate::{container::Container, settings::Settings};
 
 const NAME: &str = env!("CARGO_PKG_NAME");
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -19,6 +23,7 @@ const ACTION_RENAME: &str = "rename";
 
 pub struct GantryCrane {
     docker: Docker,
+    settings: Settings,
     containers: RefCell<HashMap<String, Container>>,
 }
 
@@ -27,6 +32,7 @@ impl GantryCrane {
         match Docker::connect_with_local_defaults() {
             Ok(docker) => GantryCrane {
                 docker,
+                settings: Settings::new(),
                 containers: RefCell::new(HashMap::new()),
             },
             Err(e) => panic!("Failed to connect to docker: {}", e),
@@ -43,7 +49,7 @@ impl GantryCrane {
                 }
             },
             _ = self.events_loop() => log::debug!("listen_for_events() ended"),
-            // _ = self.poll_loop() => log::debug!("poll_containers() ended"), // TODO: uncomment
+            _ = self.poll_loop() => log::debug!("poll_containers() ended"),
         }
 
         log::info!("Shutting down");
@@ -140,7 +146,34 @@ impl GantryCrane {
 
     /// Regularly polls all known containers and updates them accordingly.
     async fn poll_loop(&self) {
-        todo!("Regularly poll container stats");
+        loop {
+            log::debug!("Polling stats for all containers");
+            let names: Vec<String> = self.containers.borrow().keys().cloned().collect();
+
+            // Collect stats for all containers
+            let all_stats = names
+                .iter()
+                .map(|name| self.get_container_stats(name))
+                .collect::<FuturesUnordered<_>>()
+                .collect::<Vec<_>>()
+                .await;
+
+            // Update all containers with the collected stats
+            for stats in all_stats.into_iter().flatten() {
+                // Remove leading slash from name
+                let container_name = &stats.name[1..];
+
+                // Update container if available
+                if let Some(container) = self.containers.borrow_mut().get_mut(container_name) {
+                    container.update_from_stats(&stats);
+                } else {
+                    log::error!("Got stats for '{}', but no container!", container_name);
+                }
+            }
+
+            // Wait for the next iteration
+            time::sleep(Duration::from_secs(self.settings.poll_interval as u64)).await;
+        }
     }
 
     async fn add_container(&self, container_name: &str) {
@@ -155,6 +188,32 @@ impl GantryCrane {
                     "Container '{}' was already available and has been replaced",
                     container_name
                 );
+            }
+        }
+    }
+
+    async fn get_container_stats(&self, container_name: &str) -> Option<Stats> {
+        let options = StatsOptions {
+            stream: false,
+            one_shot: true,
+        };
+        let mut stream = self.docker.stats(container_name, Some(options));
+        match stream.next().await {
+            Some(Ok(stats)) => Some(stats),
+            Some(Err(e)) => {
+                log::error!(
+                    "Error trying to retrieve stats for container '{}': {}",
+                    container_name,
+                    e
+                );
+                None
+            }
+            None => {
+                log::warn!(
+                    "Got no result from stream in get_container_stats() for '{}'",
+                    container_name
+                );
+                None
             }
         }
     }
