@@ -1,7 +1,7 @@
 use std::{cell::RefCell, collections::HashMap, time::Duration};
 
 use bollard::{
-    container::{Stats, StatsOptions},
+    container::{ListContainersOptions, Stats, StatsOptions},
     service::{EventActor, EventMessageTypeEnum},
     system::EventsOptions,
     Docker,
@@ -42,6 +42,10 @@ impl GantryCrane {
     pub async fn run(&self) {
         log::info!("Starting {} {}", NAME, VERSION);
 
+        // Get available containers
+        self.get_available_containers().await;
+
+        // Run tasks endlessly
         tokio::select! {
             res = self.handle_signals() => {
                 if let Err(e) = res {
@@ -66,6 +70,33 @@ impl GantryCrane {
         Ok(())
     }
 
+    /// Adds all containers from docker
+    async fn get_available_containers(&self) {
+        let options = ListContainersOptions::<String> {
+            all: true,
+            limit: None,
+            size: false,
+            ..Default::default()
+        };
+        match self.docker.list_containers(Some(options)).await {
+            Ok(containers) => {
+                let all_stats = containers
+                    .into_iter()
+                    .flat_map(|c| c.names?.first().cloned())
+                    .collect::<Vec<_>>()
+                    .iter()
+                    .map(|name| self.get_container_stats(name))
+                    .collect::<FuturesUnordered<_>>()
+                    .collect::<Vec<_>>()
+                    .await;
+                for stats in all_stats.into_iter().flatten() {
+                    self.add_container(stats).await;
+                }
+            }
+            Err(e) => panic!("Failed to get docker containers: {}", e),
+        }
+    }
+
     /// Listens to docker container events endlessly and creates, removes or renames containers accordingly.
     async fn events_loop(&self) {
         let mut stream = self.docker.events(Some(EventsOptions::<String> {
@@ -87,12 +118,18 @@ impl GantryCrane {
                                     .map(|name| name.to_owned())
                             };
 
-                        if let Some(container_name) = get_container_attr(&event.actor, "name") {
+                        if let Some(mut container_name) = get_container_attr(&event.actor, "name") {
+                            // Events don't use the qualified container name, add the leading slash
+                            container_name.insert(0, '/');
+
                             // We only care about new, removed or renamed containers
                             match event.action.as_deref() {
                                 Some(ACTION_CREATE) => {
-                                    log::info!("Adding new container '{}'", container_name);
-                                    self.add_container(&container_name).await;
+                                    if let Some(stats) =
+                                        self.get_container_stats(&container_name).await
+                                    {
+                                        self.add_container(stats).await;
+                                    }
                                 }
                                 Some(ACTION_DESTROY) => {
                                     if let Some(_container) =
@@ -107,12 +144,9 @@ impl GantryCrane {
                                     }
                                 }
                                 Some(ACTION_RENAME) => {
-                                    if let Some(mut old_name) =
+                                    if let Some(old_name) =
                                         get_container_attr(&event.actor, "oldName")
                                     {
-                                        // Remove leading slash
-                                        old_name.remove(0);
-
                                         let mut containers = self.containers.borrow_mut();
                                         if let Some(mut container) = containers.remove(&old_name) {
                                             log::info!(
@@ -160,14 +194,11 @@ impl GantryCrane {
 
             // Update all containers with the collected stats
             for stats in all_stats.into_iter().flatten() {
-                // Remove leading slash from name
-                let container_name = &stats.name[1..];
-
                 // Update container if available
-                if let Some(container) = self.containers.borrow_mut().get_mut(container_name) {
+                if let Some(container) = self.containers.borrow_mut().get_mut(&stats.name) {
                     container.update_from_stats(&stats);
                 } else {
-                    log::error!("Got stats for '{}', but no container!", container_name);
+                    log::error!("Got stats for '{}', but no container!", &stats.name);
                 }
             }
 
@@ -176,23 +207,26 @@ impl GantryCrane {
         }
     }
 
-    async fn add_container(&self, container_name: &str) {
-        if let Some(stats) = self.get_container_stats(container_name).await {
-            if self
-                .containers
-                .borrow_mut()
-                .insert(container_name.into(), Container::from_stats(&stats))
-                .is_some()
-            {
-                log::debug!(
-                    "Container '{}' was already available and has been replaced",
-                    container_name
-                );
-            }
+    async fn add_container(&self, stats: Stats) {
+        log::info!("Adding new container '{}'", stats.name);
+        if self
+            .containers
+            .borrow_mut()
+            .insert(stats.name.clone(), Container::from_stats(&stats))
+            .is_some()
+        {
+            log::debug!(
+                "Container '{}' was already available and has been replaced",
+                stats.name
+            );
         }
     }
 
     async fn get_container_stats(&self, container_name: &str) -> Option<Stats> {
+        // Remove leading slash
+        let container_name = container_name.strip_prefix('/').unwrap_or(container_name);
+
+        // Try to get stats
         let options = StatsOptions {
             stream: false,
             one_shot: true,
