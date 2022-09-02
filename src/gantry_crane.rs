@@ -2,11 +2,14 @@ use std::{cell::RefCell, collections::HashMap, time::Duration};
 
 use bollard::{
     container::{ListContainersOptions, Stats, StatsOptions},
-    service::{EventActor, EventMessageTypeEnum},
+    service::{ContainerInspectResponse, EventActor, EventMessageTypeEnum},
     system::EventsOptions,
     Docker,
 };
-use futures::{stream::FuturesUnordered, StreamExt};
+use futures::{
+    stream::{FuturesOrdered, FuturesUnordered},
+    StreamExt,
+};
 use tokio::{
     signal::unix::{signal, SignalKind},
     time,
@@ -80,17 +83,28 @@ impl GantryCrane {
         };
         match self.docker.list_containers(Some(options)).await {
             Ok(containers) => {
-                let all_stats = containers
+                // Get all image names
+                let images = containers
+                    .iter()
+                    .map(|c| c.image.clone())
+                    .collect::<Vec<_>>();
+
+                // Get all stats and inspects
+                let all_info = containers
                     .into_iter()
                     .flat_map(|c| c.names?.first().cloned())
                     .collect::<Vec<_>>()
                     .iter()
-                    .map(|name| self.get_container_stats(name))
-                    .collect::<FuturesUnordered<_>>()
+                    .map(|name| self.get_container_stats_and_inspect(name))
+                    .collect::<FuturesOrdered<_>>()
                     .collect::<Vec<_>>()
                     .await;
-                for stats in all_stats.into_iter().flatten() {
-                    self.add_container(stats).await;
+
+                // Add containers
+                for (res, image) in all_info.into_iter().zip(images) {
+                    if let (Some(stats), Some(inspect)) = res {
+                        self.add_container(stats, inspect, image).await;
+                    }
                 }
             }
             Err(e) => panic!("Failed to get docker containers: {}", e),
@@ -125,10 +139,11 @@ impl GantryCrane {
                             // We only care about new, removed or renamed containers
                             match event.action.as_deref() {
                                 Some(ACTION_CREATE) => {
-                                    if let Some(stats) =
-                                        self.get_container_stats(&container_name).await
+                                    if let (Some(stats), Some(inspect)) =
+                                        self.get_container_stats_and_inspect(&container_name).await
                                     {
-                                        self.add_container(stats).await;
+                                        let image = get_container_attr(&event.actor, "image");
+                                        self.add_container(stats, inspect, image).await;
                                     }
                                 }
                                 Some(ACTION_DESTROY) => {
@@ -154,7 +169,7 @@ impl GantryCrane {
                                                 old_name,
                                                 container_name
                                             );
-                                            container.name = container_name.clone();
+                                            container.rename(container_name.clone());
                                             if containers
                                                 .insert(container_name.clone(), container)
                                                 .is_some()
@@ -184,21 +199,23 @@ impl GantryCrane {
             log::debug!("Polling stats for all containers");
             let names: Vec<String> = self.containers.borrow().keys().cloned().collect();
 
-            // Collect stats for all containers
-            let all_stats = names
+            // Collect info for all containers
+            let all_info = names
                 .iter()
-                .map(|name| self.get_container_stats(name))
+                .map(|name| self.get_container_stats_and_inspect(name))
                 .collect::<FuturesUnordered<_>>()
                 .collect::<Vec<_>>()
                 .await;
 
             // Update all containers with the collected stats
-            for stats in all_stats.into_iter().flatten() {
-                // Update container if available
-                if let Some(container) = self.containers.borrow_mut().get_mut(&stats.name) {
-                    container.update_from_stats(&stats);
-                } else {
-                    log::error!("Got stats for '{}', but no container!", &stats.name);
+            for res in all_info.into_iter() {
+                if let (Some(stats), Some(inspect)) = res {
+                    // Update container if available
+                    if let Some(container) = self.containers.borrow_mut().get_mut(&stats.name) {
+                        container.update(stats, inspect);
+                    } else {
+                        log::error!("Got stats for '{}', but no container!", &stats.name);
+                    }
                 }
             }
 
@@ -207,32 +224,47 @@ impl GantryCrane {
         }
     }
 
-    async fn add_container(&self, stats: Stats) {
+    async fn add_container(
+        &self,
+        stats: Stats,
+        inspect: ContainerInspectResponse,
+        image: Option<String>,
+    ) {
         log::info!("Adding new container '{}'", stats.name);
+        let name = stats.name.clone();
+        let container = Container::from_stats_and_inspect(stats, inspect, image);
         if self
             .containers
             .borrow_mut()
-            .insert(stats.name.clone(), Container::from_stats(&stats))
+            .insert(name.clone(), container)
             .is_some()
         {
             log::debug!(
                 "Container '{}' was already available and has been replaced",
-                stats.name
+                name
             );
         }
     }
 
-    async fn get_container_stats(&self, container_name: &str) -> Option<Stats> {
-        // Remove leading slash
+    async fn get_container_stats_and_inspect(
+        &self,
+        container_name: &str,
+    ) -> (Option<Stats>, Option<ContainerInspectResponse>) {
+        // Remove leading slash from name
         let container_name = container_name.strip_prefix('/').unwrap_or(container_name);
 
-        // Try to get stats
+        // Try to get stats and inspect
         let options = StatsOptions {
             stream: false,
             one_shot: true,
         };
-        let mut stream = self.docker.stats(container_name, Some(options));
-        match stream.next().await {
+        let mut stats_stream = self.docker.stats(container_name, Some(options));
+        let inspect_fut = self.docker.inspect_container(container_name, None);
+
+        // Wait for futures
+        let (stats_res, inspect_res) = tokio::join!(stats_stream.next(), inspect_fut);
+
+        let stats = match stats_res {
             Some(Ok(stats)) => Some(stats),
             Some(Err(e)) => {
                 log::error!(
@@ -244,11 +276,25 @@ impl GantryCrane {
             }
             None => {
                 log::warn!(
-                    "Got no result from stream in get_container_stats() for '{}'",
+                    "Got no stats result from stream in get_container_stats() for '{}'",
                     container_name
                 );
                 None
             }
-        }
+        };
+
+        let inspect = match inspect_res {
+            Ok(val) => Some(val),
+            Err(e) => {
+                log::error!(
+                    "Error trying to retrieve inspect for container '{}': {}",
+                    container_name,
+                    e
+                );
+                None
+            }
+        };
+
+        (stats, inspect)
     }
 }
