@@ -1,12 +1,18 @@
+use serde::Serialize;
+use std::rc::Rc;
+
 use bollard::{
     container::Stats,
     service::{ContainerInspectResponse, ContainerStateStatusEnum, HealthStatusEnum},
 };
 
-const UNKNOWN: &str = "unknown";
-
-#[derive(Debug, Default)]
+use crate::{constants::UNKNOWN, mqtt::MqttClient};
+#[derive(Serialize)]
 pub struct Container {
+    #[serde(skip)]
+    mqtt: Rc<MqttClient>,
+
+    #[serde(serialize_with = "serialize_name")]
     name: String,
     image: String,
 
@@ -15,7 +21,8 @@ pub struct Container {
 }
 
 impl Container {
-    pub fn from_stats_and_inspect(
+    pub fn new(
+        mqtt: Rc<MqttClient>,
         stats: Stats,
         inspect: ContainerInspectResponse,
         image: Option<String>,
@@ -29,9 +36,12 @@ impl Container {
         }
 
         let mut container = Container {
+            mqtt,
             name: stats.name.clone(),
             image: image.unwrap_or_else(|| UNKNOWN.into()),
-            ..Default::default()
+
+            state: Self::parse_state(&inspect),
+            health: Self::parse_health(&inspect),
         };
         container.update(stats, inspect);
         container
@@ -54,28 +64,51 @@ impl Container {
         } else {
             log::debug!("Updating Container '{}'", self.name);
 
-            self.state = if let Some(ref state) = inspect.state {
-                match state.status {
-                    Some(ContainerStateStatusEnum::EMPTY) => UNKNOWN.into(),
-                    Some(status) => status.as_ref().into(),
-                    None => UNKNOWN.into(),
-                }
-            } else {
-                UNKNOWN.into()
-            };
-
-            self.health = if let Some(ref state) = inspect.state {
-                match state.health {
-                    Some(ref health) => match health.status {
-                        Some(HealthStatusEnum::EMPTY) => UNKNOWN.into(),
-                        Some(status) => status.as_ref().into(),
-                        None => UNKNOWN.into(),
-                    },
-                    None => UNKNOWN.into(),
-                }
-            } else {
-                UNKNOWN.into()
-            };
+            self.state = Self::parse_state(&inspect);
+            self.health = Self::parse_health(&inspect);
         }
     }
+
+    pub async fn publish(&self) {
+        match serde_json::to_string(&self) {
+            Ok(json) => self.mqtt.publish(&self.name[1..], &json, true, None).await,
+            Err(e) => {
+                log::error!("Failed to serialize container '{}': {}", self.name, e)
+            }
+        };
+    }
+
+    fn parse_state(inspect: &ContainerInspectResponse) -> String {
+        if let Some(ref state) = inspect.state {
+            match state.status {
+                Some(ContainerStateStatusEnum::EMPTY) => UNKNOWN.into(),
+                Some(status) => status.as_ref().into(),
+                None => UNKNOWN.into(),
+            }
+        } else {
+            UNKNOWN.into()
+        }
+    }
+
+    fn parse_health(inspect: &ContainerInspectResponse) -> String {
+        if let Some(ref state) = inspect.state {
+            match state.health {
+                Some(ref health) => match health.status {
+                    Some(HealthStatusEnum::EMPTY) => UNKNOWN.into(),
+                    Some(status) => status.as_ref().into(),
+                    None => UNKNOWN.into(),
+                },
+                None => UNKNOWN.into(),
+            }
+        } else {
+            UNKNOWN.into()
+        }
+    }
+}
+
+fn serialize_name<S>(name: &str, s: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    s.serialize_str(&name[1..])
 }

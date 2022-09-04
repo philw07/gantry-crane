@@ -65,33 +65,23 @@ impl MqttClient {
         }
     }
 
-    pub async fn publish(
-        &self,
-        topic: &str,
-        payload: &str,
-        retain: bool,
-        qos: Option<i32>,
-    ) -> bool {
+    pub async fn publish(&self, topic: &str, payload: &str, retain: bool, qos: Option<i32>) {
+        let topic = format!("{}/{}", BASE_TOPIC, topic);
         let message = if retain {
-            mqtt::Message::new_retained(topic, payload, qos.unwrap_or(mqtt::QOS_0))
+            mqtt::Message::new_retained(&topic, payload, qos.unwrap_or(mqtt::QOS_0))
         } else {
-            mqtt::Message::new(topic, payload, qos.unwrap_or(mqtt::QOS_0))
+            mqtt::Message::new(&topic, payload, qos.unwrap_or(mqtt::QOS_0))
         };
 
         if self.client.is_connected() {
             match self.client.publish(message).await {
-                Ok(()) => {
-                    log::debug!("Published MQTT message for topic '{}'", topic);
-                    return true;
-                }
+                Ok(()) => log::debug!("Published MQTT message for topic '{}'", topic),
                 Err(e) => log::error!("Failed to publish MQTT message: {}", e),
             }
         }
-
-        false
     }
 
-    async fn publish_state(&self, online: bool) -> bool {
+    async fn publish_state(&self, online: bool) {
         let payload = format!(
             "{{\"state\": \"{}\"}}",
             if online { STATE_ONLINE } else { STATE_OFFLINE }
@@ -102,6 +92,6 @@ impl MqttClient {
             true,
             Some(mqtt::QOS_1),
         )
-        .await
+        .await;
     }
 }

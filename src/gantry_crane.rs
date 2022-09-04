@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap, time::Duration};
+use std::{cell::RefCell, collections::HashMap, rc::Rc, time::Duration};
 
 use bollard::{
     container::{ListContainersOptions, Stats, StatsOptions},
@@ -28,7 +28,7 @@ use crate::{
 pub struct GantryCrane {
     docker: Docker,
     settings: Settings,
-    mqtt: MqttClient,
+    mqtt: Rc<MqttClient>,
     containers: RefCell<HashMap<String, Container>>,
 }
 
@@ -41,7 +41,7 @@ impl GantryCrane {
                 Ok(GantryCrane {
                     docker,
                     settings,
-                    mqtt,
+                    mqtt: Rc::new(mqtt),
                     containers: RefCell::new(HashMap::new()),
                 })
             }
@@ -53,11 +53,11 @@ impl GantryCrane {
         let mut result = Ok(());
         log::info!("Starting {} {}", APP_NAME, APP_VERSION);
 
-        // Connect to MQTT
-        self.mqtt.connect().await?;
-
         // Get available containers
         self.get_available_containers().await?;
+
+        // Connect to MQTT
+        self.mqtt.connect().await?;
 
         // Run tasks endlessly
         tokio::select! {
@@ -233,6 +233,7 @@ impl GantryCrane {
                     // Update container if available
                     if let Some(container) = self.containers.borrow_mut().get_mut(&stats.name) {
                         container.update(stats, inspect);
+                        container.publish().await;
                     } else {
                         log::error!("Got stats for '{}', but no container!", &stats.name);
                     }
@@ -252,7 +253,8 @@ impl GantryCrane {
     ) {
         log::info!("Adding new container '{}'", stats.name);
         let name = stats.name.clone();
-        let container = Container::from_stats_and_inspect(stats, inspect, image);
+        let container = Container::new(self.mqtt.clone(), stats, inspect, image);
+        container.publish().await;
         if self
             .containers
             .borrow_mut()

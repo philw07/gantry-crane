@@ -325,6 +325,8 @@ dependencies = [
  "futures",
  "log",
  "paho-mqtt",
+ "serde",
+ "serde_json",
  "tokio",
  "tokio-stream",
 ]
