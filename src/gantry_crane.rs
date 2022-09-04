@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc, time::Duration};
+use std::{collections::HashMap, rc::Rc, time::Duration};
 
 use bollard::{
     container::{ListContainersOptions, Stats, StatsOptions},
@@ -12,6 +12,7 @@ use futures::{
 };
 use tokio::{
     signal::unix::{signal, SignalKind},
+    sync::RwLock,
     time,
 };
 
@@ -29,7 +30,7 @@ pub struct GantryCrane {
     docker: Docker,
     settings: Settings,
     mqtt: Rc<MqttClient>,
-    containers: RefCell<HashMap<String, Container>>,
+    containers: RwLock<HashMap<String, Container>>,
 }
 
 impl GantryCrane {
@@ -42,7 +43,7 @@ impl GantryCrane {
                     docker,
                     settings,
                     mqtt: Rc::new(mqtt),
-                    containers: RefCell::new(HashMap::new()),
+                    containers: RwLock::new(HashMap::new()),
                 })
             }
             Err(e) => panic!("Failed to connect to docker: {}", e),
@@ -167,9 +168,8 @@ impl GantryCrane {
                                     }
                                 }
                                 Some(DOCKER_EVENT_ACTION_DESTROY) => {
-                                    if let Some(_container) =
-                                        self.containers.borrow_mut().remove(&container_name)
-                                    {
+                                    let mut containers = self.containers.write().await;
+                                    if let Some(_container) = containers.remove(&container_name) {
                                         log::info!("Removed container '{}'", container_name);
                                     } else {
                                         log::debug!(
@@ -182,7 +182,7 @@ impl GantryCrane {
                                     if let Some(old_name) =
                                         get_container_attr(&event.actor, "oldName")
                                     {
-                                        let mut containers = self.containers.borrow_mut();
+                                        let mut containers = self.containers.write().await;
                                         if let Some(mut container) = containers.remove(&old_name) {
                                             log::info!(
                                                 "Renaming container '{}' to '{}'",
@@ -217,7 +217,7 @@ impl GantryCrane {
     async fn poll_loop(&self) {
         loop {
             log::debug!("Polling stats for all containers");
-            let names: Vec<String> = self.containers.borrow().keys().cloned().collect();
+            let names: Vec<String> = self.containers.read().await.keys().cloned().collect();
 
             // Collect info for all containers
             let all_info = names
@@ -231,7 +231,8 @@ impl GantryCrane {
             for res in all_info.into_iter() {
                 if let (Some(stats), Some(inspect)) = res {
                     // Update container if available
-                    if let Some(container) = self.containers.borrow_mut().get_mut(&stats.name) {
+                    let mut containers = self.containers.write().await;
+                    if let Some(container) = containers.get_mut(&stats.name) {
                         container.update(stats, inspect);
                         container.publish().await;
                     } else {
@@ -255,12 +256,8 @@ impl GantryCrane {
         let name = stats.name.clone();
         let container = Container::new(self.mqtt.clone(), stats, inspect, image);
         container.publish().await;
-        if self
-            .containers
-            .borrow_mut()
-            .insert(name.clone(), container)
-            .is_some()
-        {
+        let mut containers = self.containers.write().await;
+        if containers.insert(name.clone(), container).is_some() {
             log::debug!(
                 "Container '{}' was already available and has been replaced",
                 name
