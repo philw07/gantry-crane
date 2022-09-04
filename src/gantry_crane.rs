@@ -15,44 +15,56 @@ use tokio::{
     time,
 };
 
-use crate::{container::Container, settings::Settings};
-
-const NAME: &str = env!("CARGO_PKG_NAME");
-const VERSION: &str = env!("CARGO_PKG_VERSION");
-
-const ACTION_CREATE: &str = "create";
-const ACTION_DESTROY: &str = "destroy";
-const ACTION_RENAME: &str = "rename";
+use crate::{
+    constants::{
+        APP_NAME, APP_VERSION, DOCKER_EVENT_ACTION_CREATE, DOCKER_EVENT_ACTION_DESTROY,
+        DOCKER_EVENT_ACTION_RENAME,
+    },
+    container::Container,
+    mqtt::MqttClient,
+    settings::Settings,
+};
 
 pub struct GantryCrane {
     docker: Docker,
     settings: Settings,
+    mqtt: MqttClient,
     containers: RefCell<HashMap<String, Container>>,
 }
 
 impl GantryCrane {
-    pub fn new() -> Self {
+    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
         match Docker::connect_with_local_defaults() {
-            Ok(docker) => GantryCrane {
-                docker,
-                settings: Settings::new(),
-                containers: RefCell::new(HashMap::new()),
-            },
+            Ok(docker) => {
+                let settings = Settings::new();
+                let mqtt = MqttClient::new(&settings)?;
+                Ok(GantryCrane {
+                    docker,
+                    settings,
+                    mqtt,
+                    containers: RefCell::new(HashMap::new()),
+                })
+            }
             Err(e) => panic!("Failed to connect to docker: {}", e),
         }
     }
 
-    pub async fn run(&self) {
-        log::info!("Starting {} {}", NAME, VERSION);
+    pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let mut result = Ok(());
+        log::info!("Starting {} {}", APP_NAME, APP_VERSION);
+
+        // Connect to MQTT
+        self.mqtt.connect().await?;
 
         // Get available containers
-        self.get_available_containers().await;
+        self.get_available_containers().await?;
 
         // Run tasks endlessly
         tokio::select! {
             res = self.handle_signals() => {
                 if let Err(e) = res {
                     log::error!("An error occurred trying to setup signal handlers: {}", e);
+                    result = Err(e)
                 }
             },
             _ = self.events_loop() => log::debug!("listen_for_events() ended"),
@@ -60,6 +72,10 @@ impl GantryCrane {
         }
 
         log::info!("Shutting down");
+
+        // Disconnect from MQTT
+        self.mqtt.disconnect().await;
+        result
     }
 
     async fn handle_signals(&self) -> Result<(), Box<dyn std::error::Error>> {
@@ -74,7 +90,7 @@ impl GantryCrane {
     }
 
     /// Adds all containers from docker
-    async fn get_available_containers(&self) {
+    async fn get_available_containers(&self) -> Result<(), Box<dyn std::error::Error>> {
         let options = ListContainersOptions::<String> {
             all: true,
             limit: None,
@@ -106,8 +122,12 @@ impl GantryCrane {
                         self.add_container(stats, inspect, image).await;
                     }
                 }
+                Ok(())
             }
-            Err(e) => panic!("Failed to get docker containers: {}", e),
+            Err(e) => {
+                log::error!("Failed to get docker containers: {}", e);
+                Err(e.into())
+            }
         }
     }
 
@@ -138,7 +158,7 @@ impl GantryCrane {
 
                             // We only care about new, removed or renamed containers
                             match event.action.as_deref() {
-                                Some(ACTION_CREATE) => {
+                                Some(DOCKER_EVENT_ACTION_CREATE) => {
                                     if let (Some(stats), Some(inspect)) =
                                         self.get_container_stats_and_inspect(&container_name).await
                                     {
@@ -146,7 +166,7 @@ impl GantryCrane {
                                         self.add_container(stats, inspect, image).await;
                                     }
                                 }
-                                Some(ACTION_DESTROY) => {
+                                Some(DOCKER_EVENT_ACTION_DESTROY) => {
                                     if let Some(_container) =
                                         self.containers.borrow_mut().remove(&container_name)
                                     {
@@ -158,7 +178,7 @@ impl GantryCrane {
                                         );
                                     }
                                 }
-                                Some(ACTION_RENAME) => {
+                                Some(DOCKER_EVENT_ACTION_RENAME) => {
                                     if let Some(old_name) =
                                         get_container_attr(&event.actor, "oldName")
                                     {

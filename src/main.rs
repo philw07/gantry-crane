@@ -1,15 +1,17 @@
+mod constants;
 mod container;
 mod gantry_crane;
+mod mqtt;
 mod settings;
 
 use gantry_crane::GantryCrane;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_logging();
 
-    let app = GantryCrane::new();
-    app.run().await;
+    let app = GantryCrane::new()?;
+    app.run().await
 }
 
 fn init_logging() {
