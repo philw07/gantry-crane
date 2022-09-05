@@ -1,4 +1,4 @@
-use std::{collections::HashMap, rc::Rc, time::Duration};
+use std::{borrow::BorrowMut, collections::HashMap, rc::Rc, time::Duration};
 
 use bollard::{
     container::{ListContainersOptions, Stats, StatsOptions},
@@ -29,7 +29,7 @@ use crate::{
 pub struct GantryCrane {
     docker: Docker,
     settings: Settings,
-    mqtt: Rc<MqttClient>,
+    mqtt: Rc<RwLock<MqttClient>>,
     containers: RwLock<HashMap<String, Container>>,
 }
 
@@ -42,7 +42,7 @@ impl GantryCrane {
                 Ok(GantryCrane {
                     docker,
                     settings,
-                    mqtt: Rc::new(mqtt),
+                    mqtt: Rc::new(RwLock::new(mqtt)),
                     containers: RwLock::new(HashMap::new()),
                 })
             }
@@ -54,28 +54,47 @@ impl GantryCrane {
         let mut result = Ok(());
         log::info!("Starting {} {}", APP_NAME, APP_VERSION);
 
-        // Get available containers
-        self.get_available_containers().await?;
-
         // Connect to MQTT
-        self.mqtt.connect().await?;
+        self.mqtt.read().await.connect().await?;
 
-        // Run tasks endlessly
-        tokio::select! {
-            res = self.handle_signals() => {
-                if let Err(e) = res {
-                    log::error!("An error occurred trying to setup signal handlers: {}", e);
-                    result = Err(e)
+        // Get container list from MQTT
+        let container_list_response = self
+            .mqtt
+            .write()
+            .await
+            .subscribe_once("bridge/containers", Duration::from_secs(2))
+            .await;
+
+        // Get available containers
+        match self.get_available_containers().await {
+            Ok(()) => {
+                // Remove stale topics from MQTT
+                if let Some(container_list) = container_list_response {
+                    self.remove_stale_topics(container_list).await;
                 }
-            },
-            _ = self.events_loop() => log::debug!("listen_for_events() ended"),
-            _ = self.poll_loop() => log::debug!("poll_containers() ended"),
+
+                // Run tasks endlessly
+                tokio::select! {
+                    res = self.handle_signals() => {
+                        if let Err(e) = res {
+                            log::error!("An error occurred trying to setup signal handlers: {}", e);
+                            result = Err(e)
+                        }
+                    },
+                    _ = self.events_loop() => log::debug!("listen_for_events() ended"),
+                    _ = self.poll_loop() => log::debug!("poll_containers() ended"),
+                }
+
+                // Publish container list before shutting down
+                self.publish_container_list().await;
+            }
+            Err(e) => result = Err(e),
         }
 
         log::info!("Shutting down");
 
         // Disconnect from MQTT
-        self.mqtt.disconnect().await;
+        self.mqtt.read().await.disconnect().await;
         result
     }
 
@@ -120,7 +139,7 @@ impl GantryCrane {
                 // Add containers
                 for (res, image) in all_info.into_iter().zip(images) {
                     if let (Some(stats), Some(inspect)) = res {
-                        self.add_container(stats, inspect, image).await;
+                        self.create_container(stats, inspect, image).await;
                     }
                 }
                 Ok(())
@@ -164,12 +183,13 @@ impl GantryCrane {
                                         self.get_container_stats_and_inspect(&container_name).await
                                     {
                                         let image = get_container_attr(&event.actor, "image");
-                                        self.add_container(stats, inspect, image).await;
+                                        self.create_container(stats, inspect, image).await;
                                     }
                                 }
                                 Some(DOCKER_EVENT_ACTION_DESTROY) => {
-                                    let mut containers = self.containers.write().await;
-                                    if let Some(_container) = containers.remove(&container_name) {
+                                    if let Some(_container) =
+                                        self.remove_container(&container_name).await
+                                    {
                                         log::info!("Removed container '{}'", container_name);
                                     } else {
                                         log::debug!(
@@ -182,26 +202,7 @@ impl GantryCrane {
                                     if let Some(old_name) =
                                         get_container_attr(&event.actor, "oldName")
                                     {
-                                        let mut containers = self.containers.write().await;
-                                        if let Some(mut container) = containers.remove(&old_name) {
-                                            log::info!(
-                                                "Renaming container '{}' to '{}'",
-                                                old_name,
-                                                container_name
-                                            );
-                                            container.rename(container_name.clone());
-                                            if containers
-                                                .insert(container_name.clone(), container)
-                                                .is_some()
-                                            {
-                                                log::debug!("Container '{}' was already available and has been replaced", container_name);
-                                            }
-                                        } else {
-                                            log::debug!(
-                                                "Received rename event for unknown container '{}'",
-                                                old_name
-                                            );
-                                        }
+                                        self.rename_container(&old_name, container_name).await;
                                     }
                                 }
                                 _ => continue,
@@ -246,22 +247,59 @@ impl GantryCrane {
         }
     }
 
-    async fn add_container(
+    async fn create_container(
         &self,
         stats: Stats,
         inspect: ContainerInspectResponse,
         image: Option<String>,
     ) {
-        log::info!("Adding new container '{}'", stats.name);
-        let name = stats.name.clone();
-        let container = Container::new(self.mqtt.clone(), stats, inspect, image);
+        let mut container = Container::new(self.mqtt.clone(), stats, inspect, image);
         container.publish().await;
-        let mut containers = self.containers.write().await;
-        if containers.insert(name.clone(), container).is_some() {
-            log::debug!(
-                "Container '{}' was already available and has been replaced",
-                name
-            );
+        self.add_container(container).await;
+    }
+
+    async fn add_container(&self, container: Container) {
+        log::info!("Adding new container '{}'", container.get_name());
+        {
+            let mut containers = self.containers.write().await;
+            if let Some(old_container) = containers.insert(container.get_name().into(), container) {
+                log::debug!(
+                    "Container '{}' was already available and has been replaced",
+                    old_container.get_name()
+                );
+            }
+        }
+
+        // Update container list in MQTT
+        self.publish_container_list().await;
+    }
+
+    async fn remove_container(&self, name: &str) -> Option<Container> {
+        log::info!("Removing container '{}'", name);
+        let mut ret;
+        {
+            let mut containers = self.containers.write().await;
+            ret = containers.remove(name);
+        }
+
+        // Unpublish container
+        if let Some(container) = ret.borrow_mut() {
+            container.unpublish().await;
+        }
+
+        // Update container list in MQTT
+        self.publish_container_list().await;
+
+        ret
+    }
+
+    async fn rename_container(&self, old_name: &str, new_name: String) {
+        if let Some(mut container) = self.remove_container(old_name).await {
+            log::info!("Renaming container '{}' to '{}'", old_name, new_name);
+            container.rename(new_name);
+            self.add_container(container).await;
+        } else {
+            log::debug!("Received rename event for unknown container '{}'", old_name);
         }
     }
 
@@ -315,5 +353,48 @@ impl GantryCrane {
         };
 
         (stats, inspect)
+    }
+
+    async fn publish_container_list(&self) {
+        let containers: Vec<_> = self.containers.read().await.keys().cloned().collect();
+        if let Ok(json) = serde_json::to_string(&containers) {
+            let _ = self
+                .mqtt
+                .read()
+                .await
+                .publish("bridge/containers", &json, true, Some(1))
+                .await;
+        }
+    }
+
+    async fn remove_stale_topics(&self, container_list: String) {
+        // Remove stale topics
+        match serde_json::from_str::<Vec<String>>(&container_list) {
+            Ok(mqtt_containers) => {
+                let docker_containers: Vec<_> =
+                    self.containers.read().await.keys().cloned().collect();
+                let stale = mqtt_containers
+                    .into_iter()
+                    .filter(|name| !docker_containers.contains(name));
+                for name in stale {
+                    if let Err(e) = self
+                        .mqtt
+                        .read()
+                        .await
+                        .publish(&name[1..], "", true, Some(1))
+                        .await
+                    {
+                        log::error!(
+                            "Failed to remove stale topic for container '{}': {}",
+                            name,
+                            e
+                        );
+                    } else {
+                        log::debug!("Removed stale topic for container '{}'", name);
+                    }
+                }
+            }
+            Err(e) => log::error!("Failed to deserialize container list from MQTT: {}", e),
+        }
     }
 }

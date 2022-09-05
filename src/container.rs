@@ -1,5 +1,6 @@
 use serde::Serialize;
 use std::rc::Rc;
+use tokio::sync::RwLock;
 
 use bollard::{
     container::Stats,
@@ -10,7 +11,7 @@ use crate::{constants::UNKNOWN, mqtt::MqttClient};
 #[derive(Serialize)]
 pub struct Container {
     #[serde(skip)]
-    mqtt: Rc<MqttClient>,
+    mqtt: Rc<RwLock<MqttClient>>,
     #[serde(skip)]
     last_published: Option<String>,
 
@@ -24,7 +25,7 @@ pub struct Container {
 
 impl Container {
     pub fn new(
-        mqtt: Rc<MqttClient>,
+        mqtt: Rc<RwLock<MqttClient>>,
         stats: Stats,
         inspect: ContainerInspectResponse,
         image: Option<String>,
@@ -49,6 +50,10 @@ impl Container {
         };
         container.update(stats, inspect);
         container
+    }
+
+    pub fn get_name(&self) -> &str {
+        &self.name
     }
 
     pub fn rename(&mut self, new_name: String) {
@@ -77,7 +82,13 @@ impl Container {
         match serde_json::to_string(&self) {
             Ok(json) => {
                 if self.last_published.is_none() || self.last_published.as_ref().unwrap() != &json {
-                    if let Ok(()) = self.mqtt.publish(&self.name[1..], &json, true, None).await {
+                    if let Ok(()) = self
+                        .mqtt
+                        .read()
+                        .await
+                        .publish(&self.name[1..], &json, true, None)
+                        .await
+                    {
                         self.last_published = Some(json);
                     }
                 }
@@ -86,6 +97,18 @@ impl Container {
                 log::error!("Failed to serialize container '{}': {}", self.name, e)
             }
         };
+    }
+
+    pub async fn unpublish(&self) {
+        if let Err(e) = self
+            .mqtt
+            .read()
+            .await
+            .publish(&self.name[1..], "", true, Some(1))
+            .await
+        {
+            log::error!("Failed to unpublish container '{}': {}", self.name, e);
+        }
     }
 
     fn parse_state(inspect: &ContainerInspectResponse) -> String {

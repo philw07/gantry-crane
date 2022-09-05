@@ -2,6 +2,8 @@ use std::time::Duration;
 
 use paho_mqtt as mqtt;
 use serde::Serialize;
+use tokio::time;
+use tokio_stream::StreamExt;
 
 use crate::{
     constants::{APP_NAME, BASE_TOPIC, STATE_OFFLINE, STATE_ONLINE, STATE_TOPIC},
@@ -66,6 +68,34 @@ impl MqttClient {
         }
     }
 
+    pub async fn subscribe_once(&mut self, topic: &str, timeout: Duration) -> Option<String> {
+        let mut res = None;
+        let topic = format!("{}/{}", BASE_TOPIC, topic);
+
+        let mut stream = self.client.get_stream(1);
+        match self.client.subscribe(&topic, mqtt::QOS_1).await {
+            Ok(_) => {
+                tokio::select! {
+                    msg = stream.next() => {
+                        if let Some(Some(content)) = msg {
+                            res = Some(content.payload_str().into());
+                        }
+                    },
+                    _ = time::sleep(timeout) => {
+                        log::warn!("No MQTT message received within {:?} on topic '{}'", timeout, topic)
+                    },
+                }
+
+                if let Err(e) = self.client.unsubscribe(&topic).await {
+                    log::error!("Failed to unsubscribe from MQTT topic '{}': {}", topic, e)
+                }
+            }
+            Err(e) => log::error!("Failed to subscribe to MQTT topic '{}': {}", topic, e),
+        }
+
+        res
+    }
+
     pub async fn publish(
         &self,
         topic: &str,
@@ -96,12 +126,7 @@ impl MqttClient {
         match serde_json::to_string(state) {
             Ok(json) => {
                 let _ = self
-                    .publish(
-                        STATE_TOPIC,
-                        &json,
-                        true,
-                        Some(mqtt::QOS_1),
-                    )
+                    .publish(STATE_TOPIC, &json, true, Some(mqtt::QOS_1))
                     .await;
             }
             Err(e) => log::error!("Failed to serialize bridge state: {}", e),
