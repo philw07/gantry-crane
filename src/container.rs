@@ -31,7 +31,7 @@ impl Container {
     ) -> Self {
         if inspect.name.is_some() && inspect.name.as_ref().unwrap() != &stats.name {
             log::warn!(
-                "Creating container with stats '{}' and inspect '{}'",
+                "Creating container with stats name '{}' and inspect name '{}'",
                 stats.name,
                 inspect.name.as_ref().unwrap()
             );
@@ -70,7 +70,7 @@ impl Container {
                 inspect.name.as_deref().unwrap_or("<None>")
             )
         } else {
-            log::debug!("Updating Container '{}'", self.name);
+            log::info!("Updating Container '{}'", self.name);
 
             self.state = Self::parse_state(&inspect);
             self.health = Self::parse_health(&inspect);

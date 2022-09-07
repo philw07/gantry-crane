@@ -228,7 +228,7 @@ impl GantryCrane {
     /// Regularly polls all known containers and updates them accordingly.
     async fn poll_loop(&self) {
         loop {
-            log::debug!("Polling stats for all containers");
+            log::info!("Polling all containers");
             let names: Vec<String> = self.containers.read().await.keys().cloned().collect();
 
             // Collect info for all containers
@@ -248,7 +248,7 @@ impl GantryCrane {
                         container.update(stats, inspect);
                         container.publish().await;
                     } else {
-                        log::error!("Got stats for '{}', but no container!", &stats.name);
+                        log::warn!("Got stats for '{}', but no container!", &stats.name);
                     }
                 }
             }
@@ -304,7 +304,7 @@ impl GantryCrane {
             container.rename(new_name);
             self.add_container(container).await;
         } else {
-            log::debug!("Received rename event for unknown container '{}'", old_name);
+            log::warn!("Received rename event for unknown container '{}'", old_name);
         }
     }
 
@@ -337,10 +337,7 @@ impl GantryCrane {
                 None
             }
             None => {
-                log::warn!(
-                    "Got no stats result from stream in get_container_stats() for '{}'",
-                    container_name
-                );
+                log::warn!("Got no stats result from stream for '{}'", container_name);
                 None
             }
         };
