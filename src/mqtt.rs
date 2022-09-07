@@ -2,7 +2,6 @@ use std::{cell::Cell, collections::HashSet, time::Duration};
 
 use futures::{Stream, StreamExt};
 use paho_mqtt as mqtt;
-use serde::Serialize;
 use tokio::sync::RwLock;
 
 use crate::{
@@ -65,7 +64,7 @@ impl MqttClient {
         match self.client.connect(options).await {
             Ok(_) => {
                 log::info!("Connected to MQTT server");
-                self.publish_state(&BridgeState::online()).await;
+                self.publish_state(true).await;
                 Ok(())
             }
             Err(e) => {
@@ -76,7 +75,7 @@ impl MqttClient {
     }
 
     pub async fn disconnect(&self) -> bool {
-        self.publish_state(&BridgeState::offline()).await;
+        self.publish_state(false).await;
         match self.client.disconnect(None).await {
             Ok(_) => {
                 log::info!("Disconnected from MQTT");
@@ -155,33 +154,10 @@ impl MqttClient {
         }
     }
 
-    async fn publish_state(&self, state: &BridgeState) {
-        match serde_json::to_string(state) {
-            Ok(json) => {
-                let _ = self
-                    .publish(STATE_TOPIC, &json, true, Some(mqtt::QOS_1))
-                    .await;
-            }
-            Err(e) => log::error!("Failed to serialize bridge state: {}", e),
-        }
-    }
-}
-
-#[derive(Serialize)]
-struct BridgeState {
-    pub state: &'static str,
-}
-
-impl BridgeState {
-    fn offline() -> Self {
-        BridgeState {
-            state: STATE_OFFLINE,
-        }
-    }
-
-    fn online() -> Self {
-        BridgeState {
-            state: STATE_ONLINE,
-        }
+    async fn publish_state(&self, state: bool) {
+        let payload = if state { STATE_ONLINE } else { STATE_OFFLINE };
+        let _ = self
+            .publish(STATE_TOPIC, payload, true, Some(mqtt::QOS_1))
+            .await;
     }
 }
