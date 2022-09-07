@@ -1,17 +1,34 @@
-use std::time::Duration;
+use std::{cell::Cell, collections::HashSet, time::Duration};
 
+use futures::{Stream, StreamExt};
 use paho_mqtt as mqtt;
 use serde::Serialize;
-use tokio::time;
-use tokio_stream::StreamExt;
+use tokio::sync::RwLock;
 
 use crate::{
     constants::{APP_NAME, BASE_TOPIC, STATE_OFFLINE, STATE_ONLINE, STATE_TOPIC},
     settings::Settings,
 };
 
+pub struct MqttMessage {
+    pub topic: String,
+    pub payload: String,
+    pub retained: bool,
+}
+
+impl MqttMessage {
+    pub fn topic_stripped(&self) -> &str {
+        let topic = &self.topic;
+        topic
+            .strip_prefix(&format!("{}/", BASE_TOPIC))
+            .unwrap_or(&self.topic)
+    }
+}
+
 pub struct MqttClient {
     client: mqtt::AsyncClient,
+    receiver: Cell<Option<mqtt::AsyncReceiver<Option<mqtt::Message>>>>,
+    published: RwLock<HashSet<String>>,
 }
 
 impl MqttClient {
@@ -22,9 +39,13 @@ impl MqttClient {
             .server_uri(uri)
             .client_id(APP_NAME.to_owned())
             .finalize();
+        let mut client = mqtt::AsyncClient::new(options)?;
+        let receiver = Cell::new(Some(client.get_stream(20)));
 
         Ok(MqttClient {
-            client: mqtt::AsyncClient::new(options)?,
+            client,
+            receiver,
+            published: RwLock::new(HashSet::new()),
         })
     }
 
@@ -68,32 +89,38 @@ impl MqttClient {
         }
     }
 
-    pub async fn subscribe_once(&mut self, topic: &str, timeout: Duration) -> Option<String> {
-        let mut res = None;
-        let topic = format!("{}/{}", BASE_TOPIC, topic);
+    pub async fn subscribe(&self) -> Option<impl Stream<Item = Option<MqttMessage>> + '_> {
+        let topic = format!("{}/#", BASE_TOPIC);
 
-        let mut stream = self.client.get_stream(1);
-        match self.client.subscribe(&topic, mqtt::QOS_1).await {
-            Ok(_) => {
-                tokio::select! {
-                    msg = stream.next() => {
-                        if let Some(Some(content)) = msg {
-                            res = Some(content.payload_str().into());
-                        }
-                    },
-                    _ = time::sleep(timeout) => {
-                        log::warn!("No MQTT message received within {:?} on topic '{}'", timeout, topic)
-                    },
+        // Take receiver from cell
+        match self.receiver.take() {
+            Some(stream) => {
+                // Subscribe
+                match self.client.subscribe(&topic, mqtt::QOS_1).await {
+                    Ok(_) => {
+                        return Some(stream.filter_map(|msg| async {
+                            if let Some(msg) = msg {
+                                if !self.published.read().await.contains(msg.topic()) {
+                                    return Some(Some(MqttMessage {
+                                        topic: msg.topic().into(),
+                                        payload: msg.payload_str().into(),
+                                        retained: msg.retained(),
+                                    }));
+                                }
+                            }
+                            None
+                        }));
+                    }
+                    Err(e) => log::error!("Failed to subscribe to MQTT topic '{}': {}", topic, e),
                 }
 
-                if let Err(e) = self.client.unsubscribe(&topic).await {
-                    log::error!("Failed to unsubscribe from MQTT topic '{}': {}", topic, e)
-                }
+                // Put receiver back into cell
+                self.receiver.replace(Some(stream));
             }
-            Err(e) => log::error!("Failed to subscribe to MQTT topic '{}': {}", topic, e),
+            None => log::error!("MQTT receiver was None"),
         }
 
-        res
+        None
     }
 
     pub async fn publish(
@@ -104,12 +131,18 @@ impl MqttClient {
         qos: Option<i32>,
     ) -> Result<(), mqtt::Error> {
         let topic = format!("{}/{}", BASE_TOPIC, topic);
+
+        // Store topic we are going to publish
+        self.published.write().await.insert(topic.clone());
+
+        // Create message
         let message = if retain {
             mqtt::Message::new_retained(&topic, payload, qos.unwrap_or(mqtt::QOS_0))
         } else {
             mqtt::Message::new(&topic, payload, qos.unwrap_or(mqtt::QOS_0))
         };
 
+        // Publish message
         match self.client.publish(message).await {
             Ok(()) => {
                 log::debug!("Published MQTT message for topic '{}'", topic);

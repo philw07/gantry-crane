@@ -29,7 +29,7 @@ use crate::{
 pub struct GantryCrane {
     docker: Docker,
     settings: Settings,
-    mqtt: Rc<RwLock<MqttClient>>,
+    mqtt: Rc<MqttClient>,
     containers: RwLock<HashMap<String, Container>>,
 }
 
@@ -42,7 +42,7 @@ impl GantryCrane {
                 Ok(GantryCrane {
                     docker,
                     settings,
-                    mqtt: Rc::new(RwLock::new(mqtt)),
+                    mqtt: Rc::new(mqtt),
                     containers: RwLock::new(HashMap::new()),
                 })
             }
@@ -55,24 +55,11 @@ impl GantryCrane {
         log::info!("Starting {} {}", APP_NAME, APP_VERSION);
 
         // Connect to MQTT
-        self.mqtt.read().await.connect().await?;
-
-        // Get container list from MQTT
-        let container_list_response = self
-            .mqtt
-            .write()
-            .await
-            .subscribe_once("bridge/containers", Duration::from_secs(2))
-            .await;
+        self.mqtt.connect().await?;
 
         // Get available containers
         match self.get_available_containers().await {
             Ok(()) => {
-                // Remove stale topics from MQTT
-                if let Some(container_list) = container_list_response {
-                    self.remove_stale_topics(container_list).await;
-                }
-
                 // Run tasks endlessly
                 tokio::select! {
                     res = self.handle_signals() => {
@@ -81,12 +68,10 @@ impl GantryCrane {
                             result = Err(e)
                         }
                     },
+                    _ = self.handle_mqtt_messages() => log::debug!("handle_mqtt_messages() ended"),
                     _ = self.events_loop() => log::debug!("listen_for_events() ended"),
                     _ = self.poll_loop() => log::debug!("poll_containers() ended"),
                 }
-
-                // Publish container list before shutting down
-                self.publish_container_list().await;
             }
             Err(e) => result = Err(e),
         }
@@ -94,7 +79,7 @@ impl GantryCrane {
         log::info!("Shutting down");
 
         // Disconnect from MQTT
-        self.mqtt.read().await.disconnect().await;
+        self.mqtt.disconnect().await;
         result
     }
 
@@ -107,6 +92,32 @@ impl GantryCrane {
             _ = sigterm.recv() => log::debug!("Received SIGTERM signal"),
         };
         Ok(())
+    }
+
+    async fn handle_mqtt_messages(&self) {
+        if let Some(stream) = self.mqtt.subscribe().await {
+            let mut pinned_stream = Box::pin(stream);
+            while let Some(msg_option) = pinned_stream.next().await {
+                if let Some(msg) = msg_option {
+                    log::debug!("Received MQTT message for topic '{}'", msg.topic);
+
+                    // Remove potential stale containers
+                    if msg.retained
+                        && !self
+                            .containers
+                            .read()
+                            .await
+                            .contains_key(msg.topic_stripped())
+                    {
+                        log::debug!("Unpublishing stale container '{}'", msg.topic_stripped());
+                        let _ = self
+                            .mqtt
+                            .publish(msg.topic_stripped(), "", true, Some(1))
+                            .await;
+                    }
+                }
+            }
+        }
     }
 
     /// Adds all containers from docker
@@ -269,9 +280,6 @@ impl GantryCrane {
                 );
             }
         }
-
-        // Update container list in MQTT
-        self.publish_container_list().await;
     }
 
     async fn remove_container(&self, name: &str) -> Option<Container> {
@@ -286,9 +294,6 @@ impl GantryCrane {
         if let Some(container) = ret.borrow_mut() {
             container.unpublish().await;
         }
-
-        // Update container list in MQTT
-        self.publish_container_list().await;
 
         ret
     }
@@ -353,48 +358,5 @@ impl GantryCrane {
         };
 
         (stats, inspect)
-    }
-
-    async fn publish_container_list(&self) {
-        let containers: Vec<_> = self.containers.read().await.keys().cloned().collect();
-        if let Ok(json) = serde_json::to_string(&containers) {
-            let _ = self
-                .mqtt
-                .read()
-                .await
-                .publish("bridge/containers", &json, true, Some(1))
-                .await;
-        }
-    }
-
-    async fn remove_stale_topics(&self, container_list: String) {
-        // Remove stale topics
-        match serde_json::from_str::<Vec<String>>(&container_list) {
-            Ok(mqtt_containers) => {
-                let docker_containers: Vec<_> =
-                    self.containers.read().await.keys().cloned().collect();
-                let stale = mqtt_containers
-                    .into_iter()
-                    .filter(|name| !docker_containers.contains(name));
-                for name in stale {
-                    if let Err(e) = self
-                        .mqtt
-                        .read()
-                        .await
-                        .publish(&name[1..], "", true, Some(1))
-                        .await
-                    {
-                        log::error!(
-                            "Failed to remove stale topic for container '{}': {}",
-                            name,
-                            e
-                        );
-                    } else {
-                        log::debug!("Removed stale topic for container '{}'", name);
-                    }
-                }
-            }
-            Err(e) => log::error!("Failed to deserialize container list from MQTT: {}", e),
-        }
     }
 }
