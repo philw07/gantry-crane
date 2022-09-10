@@ -36,7 +36,14 @@ impl MqttClient {
         let options = mqtt::CreateOptionsBuilder::new()
             .mqtt_version(mqtt::MQTT_VERSION_3_1_1)
             .server_uri(uri)
-            .client_id(APP_NAME.to_owned())
+            .client_id(
+                settings
+                    .mqtt
+                    .client_id
+                    .as_deref()
+                    .unwrap_or(APP_NAME)
+                    .to_owned(),
+            )
             .finalize();
         let mut client = mqtt::AsyncClient::new(options)?;
         let receiver = Cell::new(Some(client.get_stream(20)));
