@@ -32,7 +32,7 @@ pub struct MqttClient {
 
 impl MqttClient {
     pub fn new(settings: &Settings) -> Result<Self, mqtt::Error> {
-        let uri = format!("tcp://{}:{}", settings.mqtt_host, settings.mqtt_port);
+        let uri = format!("tcp://{}:{}", settings.mqtt.host, settings.mqtt.port);
         let options = mqtt::CreateOptionsBuilder::new()
             .mqtt_version(mqtt::MQTT_VERSION_3_1_1)
             .server_uri(uri)

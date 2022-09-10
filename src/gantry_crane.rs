@@ -37,7 +37,7 @@ impl GantryCrane {
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
         match Docker::connect_with_local_defaults() {
             Ok(docker) => {
-                let settings = Settings::new();
+                let settings = Settings::new()?;
                 let mqtt = MqttClient::new(&settings)?;
                 Ok(GantryCrane {
                     docker,

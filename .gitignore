@@ -1,1 +1,4 @@
 /target
+
+# Config file used for development
+gantry-crane.toml

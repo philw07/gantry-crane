@@ -156,7 +156,7 @@ mod tests {
     fn test_new_container() {
         let name = "test_name";
         let image = "test-image";
-        let mqtt = Rc::new(MqttClient::new(&Settings::new()).unwrap());
+        let mqtt = Rc::new(MqttClient::new(&Settings::new().unwrap()).unwrap());
 
         let stats = get_stats(name);
         let inspect = ContainerInspectResponse {
@@ -175,7 +175,7 @@ mod tests {
     #[test]
     fn test_new_container_no_image() {
         let name = "other_name";
-        let mqtt = Rc::new(MqttClient::new(&Settings::new()).unwrap());
+        let mqtt = Rc::new(MqttClient::new(&Settings::new().unwrap()).unwrap());
 
         let stats = get_stats(name);
         let inspect = ContainerInspectResponse {
@@ -194,7 +194,7 @@ mod tests {
     #[test]
     fn test_rename() {
         let name = "original_name";
-        let mqtt = Rc::new(MqttClient::new(&Settings::new()).unwrap());
+        let mqtt = Rc::new(MqttClient::new(&Settings::new().unwrap()).unwrap());
 
         let stats = get_stats(name);
         let inspect = ContainerInspectResponse {
@@ -212,7 +212,7 @@ mod tests {
 
     #[test]
     fn test_update() {
-        let mqtt = Rc::new(MqttClient::new(&Settings::new()).unwrap());
+        let mqtt = Rc::new(MqttClient::new(&Settings::new().unwrap()).unwrap());
         let stats = get_stats("");
         let mut inspect = ContainerInspectResponse {
             ..Default::default()
