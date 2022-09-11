@@ -1,6 +1,8 @@
 pub const APP_NAME: &str = env!("CARGO_PKG_NAME");
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+pub const PRECISION: u32 = 2;
+
 pub const BASE_TOPIC: &str = "gantry-crane";
 pub const STATE_TOPIC: &str = "availability";
 pub const STATE_ONLINE: &str = "online";

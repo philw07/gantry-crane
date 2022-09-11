@@ -3,6 +3,7 @@ mod container;
 mod gantry_crane;
 mod mqtt;
 mod settings;
+mod util;
 
 use gantry_crane::GantryCrane;
 

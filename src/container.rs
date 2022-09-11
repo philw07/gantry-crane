@@ -2,11 +2,16 @@ use serde::Serialize;
 use std::rc::Rc;
 
 use bollard::{
-    container::Stats,
+    container::{MemoryStatsStats, Stats},
     service::{ContainerInspectResponse, ContainerStateStatusEnum, HealthStatusEnum},
 };
 
-use crate::{constants::UNKNOWN, mqtt::MqttClient};
+use crate::{
+    constants::{PRECISION, UNKNOWN},
+    mqtt::MqttClient,
+    util::round,
+};
+
 #[derive(Serialize)]
 pub struct Container {
     #[serde(skip)]
@@ -20,6 +25,10 @@ pub struct Container {
 
     state: String,
     health: String,
+
+    cpu_percentage: f64,
+    mem_percentage: f64,
+    mem: f64,
 }
 
 impl Container {
@@ -46,6 +55,10 @@ impl Container {
 
             state: Self::parse_state(&inspect),
             health: Self::parse_health(&inspect),
+
+            cpu_percentage: 0.0,
+            mem_percentage: 0.0,
+            mem: 0.0,
         };
         container.update(stats, inspect);
         container
@@ -74,6 +87,8 @@ impl Container {
 
             self.state = Self::parse_state(&inspect);
             self.health = Self::parse_health(&inspect);
+            self.cpu_percentage = Self::parse_cpu(&stats);
+            (self.mem, self.mem_percentage) = Self::parse_mem(&stats);
         }
     }
 
@@ -124,6 +139,46 @@ impl Container {
             UNKNOWN.into()
         }
     }
+
+    fn parse_cpu(stats: &Stats) -> f64 {
+        let mut cpu = 0.0;
+        if let Some(sys_usage) = stats.cpu_stats.system_cpu_usage {
+            if let Some(percpu_usage) = stats.cpu_stats.cpu_usage.percpu_usage.as_ref() {
+                let cpu_delta = stats.cpu_stats.cpu_usage.total_usage as f64
+                    - stats.precpu_stats.cpu_usage.total_usage as f64;
+                let system_delta =
+                    sys_usage as f64 - stats.precpu_stats.system_cpu_usage.unwrap_or(0) as f64;
+
+                if cpu_delta > 0.0 && system_delta > 0.0 {
+                    cpu = (cpu_delta / system_delta) * 100.0 * percpu_usage.len() as f64;
+                }
+            }
+        }
+
+        round(cpu, PRECISION)
+    }
+
+    fn parse_mem(stats: &Stats) -> (f64, f64) {
+        let mut mem = 0.0;
+        let mut percentage = 0.0;
+        if let Some(usage) = stats.memory_stats.usage {
+            mem = usage as f64;
+            // Subtract cache if available (same as docker CLI)
+            if let Some(MemoryStatsStats::V1(stats_v1)) = stats.memory_stats.stats {
+                mem -= stats_v1.total_inactive_file as f64;
+            }
+
+            // Calculate percentage
+            if let Some(limit) = stats.memory_stats.limit {
+                percentage = mem / limit as f64 * 100.0;
+            }
+
+            // Convert to MiB
+            mem /= 1_048_576.0;
+        }
+
+        (round(mem, PRECISION), round(percentage, PRECISION))
+    }
 }
 
 fn serialize_name<S>(name: &str, s: S) -> Result<S::Ok, S::Error>
@@ -139,8 +194,8 @@ mod tests {
 
     use bollard::{
         container::{
-            BlkioStats, CPUStats, CPUUsage, MemoryStats, PidsStats, Stats, StorageStats,
-            ThrottlingData,
+            BlkioStats, CPUStats, CPUUsage, MemoryStats, MemoryStatsStats, MemoryStatsStatsV1,
+            PidsStats, Stats, StorageStats, ThrottlingData,
         },
         service::{
             ContainerInspectResponse, ContainerState, ContainerStateStatusEnum, Health,
@@ -320,6 +375,46 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_parse_cpu() {
+        let mut stats = get_stats("");
+        stats.cpu_stats.cpu_usage.total_usage = 20;
+        stats.cpu_stats.system_cpu_usage = Some(200);
+        stats.precpu_stats.cpu_usage.total_usage = 10;
+        stats.precpu_stats.system_cpu_usage = Some(100);
+        assert_eq!(Container::parse_cpu(&stats), 0.0);
+
+        stats.cpu_stats.cpu_usage.percpu_usage = Some(vec![0; 2]);
+        assert_eq!(Container::parse_cpu(&stats), 20.0);
+
+        stats.cpu_stats.cpu_usage.percpu_usage = Some(vec![0; 4]);
+        assert_eq!(Container::parse_cpu(&stats), 40.0);
+
+        stats.cpu_stats.cpu_usage.total_usage = 11;
+        assert_eq!(Container::parse_cpu(&stats), 4.0);
+
+        stats.cpu_stats.system_cpu_usage = Some(150);
+        assert_eq!(Container::parse_cpu(&stats), 8.0);
+
+        stats.cpu_stats.system_cpu_usage = None;
+        assert_eq!(Container::parse_cpu(&stats), 0.0);
+    }
+
+    #[test]
+    fn test_parse_mem() {
+        let mut stats = get_stats("");
+        assert_eq!(Container::parse_mem(&stats), (0.0, 0.0));
+
+        stats.memory_stats.usage = Some(100 * 1_048_576);
+        assert_eq!(Container::parse_mem(&stats), (100.0, 0.0));
+
+        stats.memory_stats.limit = Some(1000 * 1_048_576);
+        assert_eq!(Container::parse_mem(&stats), (100.0, 10.0));
+
+        stats.memory_stats.stats = Some(MemoryStatsStats::V1(get_memory_stats_v1(10 * 1_048_576)));
+        assert_eq!(Container::parse_mem(&stats), (90.0, 9.0));
+    }
+
     fn get_stats(name: &str) -> Stats {
         let cpu = CPUStats {
             cpu_usage: CPUUsage {
@@ -378,6 +473,45 @@ mod tests {
                 write_count_normalized: None,
                 write_size_bytes: None,
             },
+        }
+    }
+
+    fn get_memory_stats_v1(total_inactive_file: u64) -> MemoryStatsStatsV1 {
+        MemoryStatsStatsV1 {
+            active_anon: 0,
+            active_file: 0,
+            cache: 0,
+            dirty: 0,
+            hierarchical_memory_limit: 0,
+            hierarchical_memsw_limit: Some(0),
+            inactive_anon: 0,
+            inactive_file: 0,
+            mapped_file: 0,
+            pgfault: 0,
+            pgmajfault: 0,
+            pgpgin: 0,
+            pgpgout: 0,
+            rss: 0,
+            rss_huge: 0,
+            shmem: Some(0),
+            total_active_anon: 0,
+            total_active_file: 0,
+            total_cache: 0,
+            total_dirty: 0,
+            total_inactive_anon: 0,
+            total_inactive_file,
+            total_mapped_file: 0,
+            total_pgfault: 0,
+            total_pgmajfault: 0,
+            total_pgpgin: 0,
+            total_pgpgout: 0,
+            total_rss: 0,
+            total_rss_huge: 0,
+            total_shmem: Some(0),
+            total_unevictable: 0,
+            total_writeback: 0,
+            unevictable: 0,
+            writeback: 0,
         }
     }
 }
