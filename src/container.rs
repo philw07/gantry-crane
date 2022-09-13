@@ -28,7 +28,7 @@ pub struct Container {
 
     cpu_percentage: f64,
     mem_percentage: f64,
-    mem: f64,
+    mem_mb: f64,
 }
 
 impl Container {
@@ -58,7 +58,7 @@ impl Container {
 
             cpu_percentage: 0.0,
             mem_percentage: 0.0,
-            mem: 0.0,
+            mem_mb: 0.0,
         };
         container.update(stats, inspect);
         container
@@ -177,7 +177,7 @@ impl Container {
             mem /= 1_048_576.0;
         }
 
-        self.mem = round(mem, PRECISION);
+        self.mem_mb = round(mem, PRECISION);
         self.mem_percentage = round(percentage, PRECISION);
     }
 }
@@ -435,22 +435,22 @@ mod tests {
         };
         let mut container = Container::new(mqtt.clone(), stats.clone(), inspect.clone(), None);
 
-        assert_eq!(container.mem, 0.0);
+        assert_eq!(container.mem_mb, 0.0);
         assert_eq!(container.mem_percentage, 0.0);
 
         stats.memory_stats.usage = Some(100 * 1_048_576);
         container.parse_mem(&stats);
-        assert_eq!(container.mem, 100.0);
+        assert_eq!(container.mem_mb, 100.0);
         assert_eq!(container.mem_percentage, 0.0);
 
         stats.memory_stats.limit = Some(1000 * 1_048_576);
         container.parse_mem(&stats);
-        assert_eq!(container.mem, 100.0);
+        assert_eq!(container.mem_mb, 100.0);
         assert_eq!(container.mem_percentage, 10.0);
 
         stats.memory_stats.stats = Some(MemoryStatsStats::V1(get_memory_stats_v1(10 * 1_048_576)));
         container.parse_mem(&stats);
-        assert_eq!(container.mem, 90.0);
+        assert_eq!(container.mem_mb, 90.0);
         assert_eq!(container.mem_percentage, 9.0);
     }
 
