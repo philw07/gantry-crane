@@ -53,8 +53,8 @@ impl Container {
             name: stats.name.clone(),
             image: image.unwrap_or_else(|| UNKNOWN.into()),
 
-            state: Self::parse_state(&inspect),
-            health: Self::parse_health(&inspect),
+            state: UNKNOWN.into(),
+            health: UNKNOWN.into(),
 
             cpu_percentage: 0.0,
             mem_percentage: 0.0,
@@ -85,10 +85,10 @@ impl Container {
         } else {
             log::info!("Updating Container '{}'", self.name);
 
-            self.state = Self::parse_state(&inspect);
-            self.health = Self::parse_health(&inspect);
-            self.cpu_percentage = Self::parse_cpu(&stats);
-            (self.mem, self.mem_percentage) = Self::parse_mem(&stats);
+            self.parse_state(&inspect);
+            self.parse_health(&inspect);
+            self.parse_cpu(&stats);
+            self.parse_mem(&stats);
         }
     }
 
@@ -113,8 +113,8 @@ impl Container {
         }
     }
 
-    fn parse_state(inspect: &ContainerInspectResponse) -> String {
-        if let Some(ref state) = inspect.state {
+    fn parse_state(&mut self, inspect: &ContainerInspectResponse) {
+        self.state = if let Some(ref state) = inspect.state {
             match state.status {
                 Some(ContainerStateStatusEnum::EMPTY) => UNKNOWN.into(),
                 Some(status) => status.as_ref().into(),
@@ -125,8 +125,8 @@ impl Container {
         }
     }
 
-    fn parse_health(inspect: &ContainerInspectResponse) -> String {
-        if let Some(ref state) = inspect.state {
+    fn parse_health(&mut self, inspect: &ContainerInspectResponse) {
+        self.health = if let Some(ref state) = inspect.state {
             match state.health {
                 Some(ref health) => match health.status {
                     Some(HealthStatusEnum::EMPTY) => UNKNOWN.into(),
@@ -140,7 +140,7 @@ impl Container {
         }
     }
 
-    fn parse_cpu(stats: &Stats) -> f64 {
+    fn parse_cpu(&mut self, stats: &Stats) {
         let mut cpu = 0.0;
         if let Some(sys_usage) = stats.cpu_stats.system_cpu_usage {
             if let Some(percpu_usage) = stats.cpu_stats.cpu_usage.percpu_usage.as_ref() {
@@ -155,10 +155,10 @@ impl Container {
             }
         }
 
-        round(cpu, PRECISION)
+        self.cpu_percentage = round(cpu, PRECISION)
     }
 
-    fn parse_mem(stats: &Stats) -> (f64, f64) {
+    fn parse_mem(&mut self, stats: &Stats) {
         let mut mem = 0.0;
         let mut percentage = 0.0;
         if let Some(usage) = stats.memory_stats.usage {
@@ -177,7 +177,8 @@ impl Container {
             mem /= 1_048_576.0;
         }
 
-        (round(mem, PRECISION), round(percentage, PRECISION))
+        self.mem = round(mem, PRECISION);
+        self.mem_percentage = round(percentage, PRECISION);
     }
 }
 
@@ -292,16 +293,21 @@ mod tests {
 
     #[test]
     fn test_parse_state() {
+        let mqtt = Rc::new(MqttClient::new(&Settings::new().unwrap()).unwrap());
+        let stats = get_stats("");
         let mut inspect = ContainerInspectResponse {
             ..Default::default()
         };
-        assert_eq!(Container::parse_state(&inspect), UNKNOWN);
+        let mut container = Container::new(mqtt.clone(), stats.clone(), inspect.clone(), None);
+
+        assert_eq!(container.state, UNKNOWN);
 
         // Test no status
         inspect.state = Some(ContainerState {
             ..Default::default()
         });
-        assert_eq!(Container::parse_state(&inspect), UNKNOWN);
+        container.parse_state(&inspect);
+        assert_eq!(container.state, UNKNOWN);
 
         // Test each status value
         let enum_values = [
@@ -324,22 +330,28 @@ mod tests {
             } else {
                 val.as_ref()
             };
-            assert_eq!(Container::parse_state(&inspect), expected);
+            container.parse_state(&inspect);
+            assert_eq!(container.state, expected);
         }
     }
 
     #[test]
     fn test_parse_health() {
+        let mqtt = Rc::new(MqttClient::new(&Settings::new().unwrap()).unwrap());
+        let stats = get_stats("");
         let mut inspect = ContainerInspectResponse {
             ..Default::default()
         };
-        assert_eq!(Container::parse_health(&inspect), UNKNOWN);
+        let mut container = Container::new(mqtt.clone(), stats.clone(), inspect.clone(), None);
+
+        assert_eq!(container.health, UNKNOWN);
 
         // Test no health
         inspect.state = Some(ContainerState {
             ..Default::default()
         });
-        assert_eq!(Container::parse_state(&inspect), UNKNOWN);
+        container.parse_health(&inspect);
+        assert_eq!(container.health, UNKNOWN);
 
         // Test no health status
         inspect.state = Some(ContainerState {
@@ -348,7 +360,8 @@ mod tests {
             }),
             ..Default::default()
         });
-        assert_eq!(Container::parse_state(&inspect), UNKNOWN);
+        container.parse_health(&inspect);
+        assert_eq!(container.health, UNKNOWN);
 
         // Test each health status
         let enum_values = [
@@ -371,48 +384,74 @@ mod tests {
             } else {
                 val.as_ref()
             };
-            assert_eq!(Container::parse_health(&inspect), expected);
+            container.parse_health(&inspect);
+            assert_eq!(container.health, expected);
         }
     }
 
     #[test]
     fn test_parse_cpu() {
+        let mqtt = Rc::new(MqttClient::new(&Settings::new().unwrap()).unwrap());
         let mut stats = get_stats("");
+        let inspect = ContainerInspectResponse {
+            ..Default::default()
+        };
+        let mut container = Container::new(mqtt.clone(), stats.clone(), inspect.clone(), None);
+
         stats.cpu_stats.cpu_usage.total_usage = 20;
         stats.cpu_stats.system_cpu_usage = Some(200);
         stats.precpu_stats.cpu_usage.total_usage = 10;
         stats.precpu_stats.system_cpu_usage = Some(100);
-        assert_eq!(Container::parse_cpu(&stats), 0.0);
+        container.parse_cpu(&stats);
+        assert_eq!(container.cpu_percentage, 0.0);
 
         stats.cpu_stats.cpu_usage.percpu_usage = Some(vec![0; 2]);
-        assert_eq!(Container::parse_cpu(&stats), 20.0);
+        container.parse_cpu(&stats);
+        assert_eq!(container.cpu_percentage, 20.0);
 
         stats.cpu_stats.cpu_usage.percpu_usage = Some(vec![0; 4]);
-        assert_eq!(Container::parse_cpu(&stats), 40.0);
+        container.parse_cpu(&stats);
+        assert_eq!(container.cpu_percentage, 40.0);
 
         stats.cpu_stats.cpu_usage.total_usage = 11;
-        assert_eq!(Container::parse_cpu(&stats), 4.0);
+        container.parse_cpu(&stats);
+        assert_eq!(container.cpu_percentage, 4.0);
 
         stats.cpu_stats.system_cpu_usage = Some(150);
-        assert_eq!(Container::parse_cpu(&stats), 8.0);
+        container.parse_cpu(&stats);
+        assert_eq!(container.cpu_percentage, 8.0);
 
         stats.cpu_stats.system_cpu_usage = None;
-        assert_eq!(Container::parse_cpu(&stats), 0.0);
+        container.parse_cpu(&stats);
+        assert_eq!(container.cpu_percentage, 0.0);
     }
 
     #[test]
     fn test_parse_mem() {
+        let mqtt = Rc::new(MqttClient::new(&Settings::new().unwrap()).unwrap());
         let mut stats = get_stats("");
-        assert_eq!(Container::parse_mem(&stats), (0.0, 0.0));
+        let inspect = ContainerInspectResponse {
+            ..Default::default()
+        };
+        let mut container = Container::new(mqtt.clone(), stats.clone(), inspect.clone(), None);
+
+        assert_eq!(container.mem, 0.0);
+        assert_eq!(container.mem_percentage, 0.0);
 
         stats.memory_stats.usage = Some(100 * 1_048_576);
-        assert_eq!(Container::parse_mem(&stats), (100.0, 0.0));
+        container.parse_mem(&stats);
+        assert_eq!(container.mem, 100.0);
+        assert_eq!(container.mem_percentage, 0.0);
 
         stats.memory_stats.limit = Some(1000 * 1_048_576);
-        assert_eq!(Container::parse_mem(&stats), (100.0, 10.0));
+        container.parse_mem(&stats);
+        assert_eq!(container.mem, 100.0);
+        assert_eq!(container.mem_percentage, 10.0);
 
         stats.memory_stats.stats = Some(MemoryStatsStats::V1(get_memory_stats_v1(10 * 1_048_576)));
-        assert_eq!(Container::parse_mem(&stats), (90.0, 9.0));
+        container.parse_mem(&stats);
+        assert_eq!(container.mem, 90.0);
+        assert_eq!(container.mem_percentage, 9.0);
     }
 
     fn get_stats(name: &str) -> Stats {
