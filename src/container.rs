@@ -29,6 +29,10 @@ pub struct Container {
     cpu_percentage: f64,
     mem_percentage: f64,
     mem_mb: f64,
+    net_rx_mb: f64,
+    net_tx_mb: f64,
+    block_rx_mb: f64,
+    block_tx_mb: f64,
 }
 
 impl Container {
@@ -59,6 +63,10 @@ impl Container {
             cpu_percentage: 0.0,
             mem_percentage: 0.0,
             mem_mb: 0.0,
+            net_rx_mb: 0.0,
+            net_tx_mb: 0.0,
+            block_rx_mb: 0.0,
+            block_tx_mb: 0.0,
         };
         container.update(stats, inspect);
         container
@@ -89,6 +97,8 @@ impl Container {
             self.parse_health(&inspect);
             self.parse_cpu(&stats);
             self.parse_mem(&stats);
+            self.parse_network(&stats);
+            self.parse_block_io(&stats);
         }
     }
 
@@ -180,6 +190,49 @@ impl Container {
         self.mem_mb = round(mem, PRECISION);
         self.mem_percentage = round(percentage, PRECISION);
     }
+
+    fn parse_network(&mut self, stats: &Stats) {
+        let mut rx = 0.0;
+        let mut tx = 0.0;
+
+        // Sum all networks
+        if let Some(networks) = stats.networks.as_ref() {
+            for network in networks.values() {
+                rx += network.rx_bytes as f64;
+                tx += network.tx_bytes as f64;
+            }
+        }
+
+        // Convert to MiB
+        rx /= 1_048_576.0;
+        tx /= 1_048_576.0;
+
+        self.net_rx_mb = round(rx, PRECISION);
+        self.net_tx_mb = round(tx, PRECISION);
+    }
+
+    fn parse_block_io(&mut self, stats: &Stats) {
+        let mut rx = 0.0;
+        let mut tx = 0.0;
+
+        // Sum all entries
+        if let Some(entries) = stats.blkio_stats.io_service_bytes_recursive.as_ref() {
+            for entry in entries {
+                match entry.op.to_lowercase().as_str() {
+                    "read" => rx += entry.value as f64,
+                    "write" => tx += entry.value as f64,
+                    _ => (),
+                }
+            }
+        }
+
+        // Convert to MiB
+        rx /= 1_048_576.0;
+        tx /= 1_048_576.0;
+
+        self.block_rx_mb = round(rx, PRECISION);
+        self.block_tx_mb = round(tx, PRECISION);
+    }
 }
 
 fn serialize_name<S>(name: &str, s: S) -> Result<S::Ok, S::Error>
@@ -191,12 +244,12 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
+    use std::{collections::HashMap, rc::Rc};
 
     use bollard::{
         container::{
-            BlkioStats, CPUStats, CPUUsage, MemoryStats, MemoryStatsStats, MemoryStatsStatsV1,
-            PidsStats, Stats, StorageStats, ThrottlingData,
+            BlkioStats, BlkioStatsEntry, CPUStats, CPUUsage, MemoryStats, MemoryStatsStats,
+            MemoryStatsStatsV1, NetworkStats, PidsStats, Stats, StorageStats, ThrottlingData,
         },
         service::{
             ContainerInspectResponse, ContainerState, ContainerStateStatusEnum, Health,
@@ -269,13 +322,14 @@ mod tests {
     #[test]
     fn test_update() {
         let mqtt = Rc::new(MqttClient::new(&Settings::new().unwrap()).unwrap());
-        let stats = get_stats("");
+        let mut stats = get_stats("");
         let mut inspect = ContainerInspectResponse {
             ..Default::default()
         };
 
         let mut container = Container::new(mqtt.clone(), stats.clone(), inspect.clone(), None);
 
+        // Update state and health
         let status = ContainerStateStatusEnum::DEAD;
         let health = HealthStatusEnum::UNHEALTHY;
         inspect.state = Some(ContainerState {
@@ -286,9 +340,67 @@ mod tests {
             }),
             ..Default::default()
         });
+
+        // Update CPU
+        stats.cpu_stats.cpu_usage.total_usage = 20;
+        stats.cpu_stats.system_cpu_usage = Some(200);
+        stats.precpu_stats.cpu_usage.total_usage = 10;
+        stats.precpu_stats.system_cpu_usage = Some(100);
+        stats.cpu_stats.cpu_usage.percpu_usage = Some(vec![0; 2]);
+
+        // Update memory
+        stats.memory_stats.usage = Some(100 * 1_048_576);
+        stats.memory_stats.limit = Some(1000 * 1_048_576);
+
+        // Update network I/O
+        stats.networks = Some(HashMap::new());
+        stats
+            .networks
+            .as_mut()
+            .unwrap()
+            .insert("a".into(), get_network_stats(5 * 1_048_576, 10 * 1_048_576));
+
+        // Update block I/O
+        stats.blkio_stats.io_service_bytes_recursive = Some(Vec::new());
+        stats
+            .blkio_stats
+            .io_service_bytes_recursive
+            .as_mut()
+            .unwrap()
+            .insert(
+                0,
+                BlkioStatsEntry {
+                    major: 0,
+                    minor: 0,
+                    op: "Read".into(),
+                    value: 10 * 1_048_576,
+                },
+            );
+        stats
+            .blkio_stats
+            .io_service_bytes_recursive
+            .as_mut()
+            .unwrap()
+            .insert(
+                0,
+                BlkioStatsEntry {
+                    major: 0,
+                    minor: 0,
+                    op: "Write".into(),
+                    value: 3 * 1_048_576,
+                },
+            );
+
         container.update(stats, inspect);
         assert_eq!(container.state, status.as_ref());
         assert_eq!(container.health, health.as_ref());
+        assert_eq!(container.cpu_percentage, 20.0);
+        assert_eq!(container.mem_mb, 100.0);
+        assert_eq!(container.mem_percentage, 10.0);
+        assert_eq!(container.net_rx_mb, 5.0);
+        assert_eq!(container.net_tx_mb, 10.0);
+        assert_eq!(container.block_rx_mb, 10.0);
+        assert_eq!(container.block_tx_mb, 3.0);
     }
 
     #[test]
@@ -454,6 +566,138 @@ mod tests {
         assert_eq!(container.mem_percentage, 9.0);
     }
 
+    #[test]
+    fn test_parse_network() {
+        let mqtt = Rc::new(MqttClient::new(&Settings::new().unwrap()).unwrap());
+        let mut stats = get_stats("");
+        let inspect = ContainerInspectResponse {
+            ..Default::default()
+        };
+        let mut container = Container::new(mqtt.clone(), stats.clone(), inspect.clone(), None);
+
+        assert_eq!(container.net_rx_mb, 0.0);
+        assert_eq!(container.net_tx_mb, 0.0);
+
+        stats.networks = Some(HashMap::new());
+        assert_eq!(container.net_rx_mb, 0.0);
+        assert_eq!(container.net_tx_mb, 0.0);
+
+        stats
+            .networks
+            .as_mut()
+            .unwrap()
+            .insert("a".into(), get_network_stats(5 * 1_048_576, 10 * 1_048_576));
+        container.parse_network(&stats);
+        assert_eq!(container.net_rx_mb, 5.0);
+        assert_eq!(container.net_tx_mb, 10.0);
+
+        stats
+            .networks
+            .as_mut()
+            .unwrap()
+            .insert("b".into(), get_network_stats(7 * 1_048_576, 15 * 1_048_576));
+        stats
+            .networks
+            .as_mut()
+            .unwrap()
+            .insert("c".into(), get_network_stats(8 * 1_048_576, 3 * 1_048_576));
+        container.parse_network(&stats);
+        assert_eq!(container.net_rx_mb, 20.0);
+        assert_eq!(container.net_tx_mb, 28.0);
+    }
+
+    #[test]
+    fn test_parse_block_io() {
+        let mqtt = Rc::new(MqttClient::new(&Settings::new().unwrap()).unwrap());
+        let mut stats = get_stats("");
+        let inspect = ContainerInspectResponse {
+            ..Default::default()
+        };
+        let mut container = Container::new(mqtt.clone(), stats.clone(), inspect.clone(), None);
+
+        assert_eq!(container.block_rx_mb, 0.0);
+        assert_eq!(container.block_tx_mb, 0.0);
+
+        stats.blkio_stats.io_service_bytes_recursive = Some(Vec::new());
+        container.parse_block_io(&stats);
+        assert_eq!(container.block_rx_mb, 0.0);
+        assert_eq!(container.block_tx_mb, 0.0);
+
+        stats
+            .blkio_stats
+            .io_service_bytes_recursive
+            .as_mut()
+            .unwrap()
+            .insert(
+                0,
+                BlkioStatsEntry {
+                    major: 0,
+                    minor: 0,
+                    op: "Read".into(),
+                    value: 10 * 1_048_576,
+                },
+            );
+        stats
+            .blkio_stats
+            .io_service_bytes_recursive
+            .as_mut()
+            .unwrap()
+            .insert(
+                0,
+                BlkioStatsEntry {
+                    major: 0,
+                    minor: 0,
+                    op: "Write".into(),
+                    value: 3 * 1_048_576,
+                },
+            );
+        stats
+            .blkio_stats
+            .io_service_bytes_recursive
+            .as_mut()
+            .unwrap()
+            .insert(
+                0,
+                BlkioStatsEntry {
+                    major: 0,
+                    minor: 0,
+                    op: "Write".into(),
+                    value: 4 * 1_048_576,
+                },
+            );
+        stats
+            .blkio_stats
+            .io_service_bytes_recursive
+            .as_mut()
+            .unwrap()
+            .insert(
+                0,
+                BlkioStatsEntry {
+                    major: 0,
+                    minor: 0,
+                    op: "Read".into(),
+                    value: 5 * 1_048_576,
+                },
+            );
+        stats
+            .blkio_stats
+            .io_service_bytes_recursive
+            .as_mut()
+            .unwrap()
+            .insert(
+                0,
+                BlkioStatsEntry {
+                    major: 0,
+                    minor: 0,
+                    op: "Write".into(),
+                    value: 3 * 1_048_576,
+                },
+            );
+        container.parse_block_io(&stats);
+        assert_eq!(container.block_rx_mb, 15.0);
+        assert_eq!(container.block_tx_mb, 10.0);
+    }
+
     fn get_stats(name: &str) -> Stats {
         let cpu = CPUStats {
             cpu_usage: CPUUsage {
@@ -551,6 +795,19 @@ mod tests {
             total_writeback: 0,
             unevictable: 0,
             writeback: 0,
+        }
+    }
+
+    fn get_network_stats(rx: u64, tx: u64) -> NetworkStats {
+        NetworkStats {
+            rx_dropped: 0,
+            rx_bytes: rx,
+            rx_errors: 0,
+            tx_packets: 0,
+            tx_dropped: 0,
+            rx_packets: 0,
+            tx_errors: 0,
+            tx_bytes: tx,
         }
     }
 }
