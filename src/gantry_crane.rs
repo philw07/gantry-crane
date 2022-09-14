@@ -19,7 +19,9 @@ use tokio::{
 use crate::{
     constants::{
         APP_NAME, APP_VERSION, DOCKER_EVENT_ACTION_CREATE, DOCKER_EVENT_ACTION_DESTROY,
-        DOCKER_EVENT_ACTION_RENAME,
+        DOCKER_EVENT_ACTION_PAUSE, DOCKER_EVENT_ACTION_RENAME, DOCKER_EVENT_ACTION_RESTART,
+        DOCKER_EVENT_ACTION_START, DOCKER_EVENT_ACTION_STOP, DOCKER_EVENT_ACTION_UNPAUSE,
+        SET_STATE_TOPIC,
     },
     container::Container,
     mqtt::MqttClient,
@@ -100,20 +102,102 @@ impl GantryCrane {
             while let Some(msg_option) = pinned_stream.next().await {
                 if let Some(msg) = msg_option {
                     log::debug!("Received MQTT message for topic '{}'", msg.topic);
+                    let subtopics: Vec<_> = msg.topic_stripped().split('/').collect();
+                    let container_name = format!("/{}", subtopics[0]);
 
                     // Remove potential stale containers
-                    if msg.retained
-                        && !self
-                            .containers
-                            .read()
-                            .await
-                            .contains_key(msg.topic_stripped())
-                    {
-                        log::debug!("Unpublishing stale container '{}'", msg.topic_stripped());
+                    if msg.retained && subtopics.len() == 1 {
+                        // Ignore message if container exists
+                        if self.containers.read().await.contains_key(&container_name) {
+                            continue;
+                        }
+
+                        log::debug!("Unpublishing stale container '{}'", container_name);
                         let _ = self
                             .mqtt
-                            .publish(msg.topic_stripped(), "", true, Some(1))
+                            .publish(&container_name[1..], "", true, Some(1))
                             .await;
+                    }
+                    // Handle container requests
+                    else if !msg.retained
+                        && subtopics.len() == 2
+                        && subtopics[1] == SET_STATE_TOPIC
+                    {
+                        // Ignore if container doesn't exist
+                        if !self.containers.read().await.contains_key(&container_name) {
+                            continue;
+                        }
+
+                        match msg.payload.as_str() {
+                            DOCKER_EVENT_ACTION_START => {
+                                log::info!(
+                                    "Trying to {} container '{}'",
+                                    msg.payload,
+                                    container_name
+                                );
+                                if let Err(e) = self
+                                    .docker
+                                    .start_container::<String>(&container_name[1..], None)
+                                    .await
+                                {
+                                    log::error!("Failed to {} container: {}", msg.payload, e);
+                                };
+                            }
+                            DOCKER_EVENT_ACTION_STOP => {
+                                log::info!(
+                                    "Trying to {} container '{}'",
+                                    msg.payload,
+                                    container_name
+                                );
+                                if let Err(e) =
+                                    self.docker.stop_container(&container_name[1..], None).await
+                                {
+                                    log::error!("Failed to {} container: {}", msg.payload, e);
+                                };
+                            }
+                            DOCKER_EVENT_ACTION_RESTART => {
+                                log::info!(
+                                    "Trying to {} container '{}'",
+                                    msg.payload,
+                                    container_name
+                                );
+                                if let Err(e) = self
+                                    .docker
+                                    .restart_container(&container_name[1..], None)
+                                    .await
+                                {
+                                    log::error!("Failed to {} container: {}", msg.payload, e);
+                                };
+                            }
+                            DOCKER_EVENT_ACTION_PAUSE => {
+                                log::info!(
+                                    "Trying to {} container '{}'",
+                                    msg.payload,
+                                    container_name
+                                );
+                                if let Err(e) =
+                                    self.docker.pause_container(&container_name[1..]).await
+                                {
+                                    log::error!("Failed to {} container: {}", msg.payload, e);
+                                };
+                            }
+                            DOCKER_EVENT_ACTION_UNPAUSE => {
+                                log::info!(
+                                    "Trying to {} container '{}'",
+                                    msg.payload,
+                                    container_name
+                                );
+                                if let Err(e) =
+                                    self.docker.unpause_container(&container_name[1..]).await
+                                {
+                                    log::error!("Failed to {} container: {}", msg.payload, e);
+                                };
+                            }
+                            _ => log::warn!(
+                                "Received unknown payload in set state message: {}",
+                                msg.payload
+                            ),
+                        }
                     }
                 }
             }
