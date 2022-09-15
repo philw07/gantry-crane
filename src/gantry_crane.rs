@@ -12,7 +12,10 @@ use futures::{
 };
 use tokio::{
     signal::unix::{signal, SignalKind},
-    sync::RwLock,
+    sync::{
+        mpsc::{Receiver, Sender},
+        RwLock,
+    },
     time,
 };
 
@@ -62,6 +65,8 @@ impl GantryCrane {
         // Get available containers
         match self.get_available_containers().await {
             Ok(()) => {
+                let (tx, rx) = tokio::sync::mpsc::channel::<()>(5);
+
                 // Run tasks endlessly
                 tokio::select! {
                     res = self.handle_signals() => {
@@ -71,8 +76,8 @@ impl GantryCrane {
                         }
                     },
                     _ = self.handle_mqtt_messages() => log::debug!("handle_mqtt_messages() ended"),
-                    _ = self.events_loop() => log::debug!("listen_for_events() ended"),
-                    _ = self.poll_loop() => log::debug!("poll_containers() ended"),
+                    _ = self.events_loop(tx) => log::debug!("listen_for_events() ended"),
+                    _ = self.poll_loop(rx) => log::debug!("poll_containers() ended"),
                 }
             }
             Err(e) => result = Err(e),
@@ -247,7 +252,7 @@ impl GantryCrane {
     }
 
     /// Listens to docker container events endlessly and creates, removes or renames containers accordingly.
-    async fn events_loop(&self) {
+    async fn events_loop(&self, tx: Sender<()>) {
         let mut stream = self.docker.events(Some(EventsOptions::<String> {
             until: None,
             ..Default::default()
@@ -271,7 +276,7 @@ impl GantryCrane {
                             // Events don't use the qualified container name, add the leading slash
                             container_name.insert(0, '/');
 
-                            // We only care about new, removed or renamed containers
+                            // Handle events we care about
                             match event.action.as_deref() {
                                 Some(DOCKER_EVENT_ACTION_CREATE) => {
                                     if let (Some(stats), Some(inspect)) =
@@ -300,6 +305,19 @@ impl GantryCrane {
                                         self.rename_container(&old_name, container_name).await;
                                     }
                                 }
+                                Some(DOCKER_EVENT_ACTION_START)
+                                | Some(DOCKER_EVENT_ACTION_STOP)
+                                | Some(DOCKER_EVENT_ACTION_RESTART)
+                                | Some(DOCKER_EVENT_ACTION_PAUSE)
+                                | Some(DOCKER_EVENT_ACTION_UNPAUSE) => {
+                                    // Inform poll loop
+                                    if let Err(e) = tx.send(()).await {
+                                        log::error!(
+                                            "Failed to send message through channel: {}",
+                                            e
+                                        );
+                                    }
+                                }
                                 _ => continue,
                             }
                         }
@@ -310,7 +328,8 @@ impl GantryCrane {
     }
 
     /// Regularly polls all known containers and updates them accordingly.
-    async fn poll_loop(&self) {
+    async fn poll_loop(&self, mut rx: Receiver<()>) {
+        let mut channel_open = true;
         loop {
             log::info!("Polling all containers");
             let names: Vec<String> = self.containers.read().await.keys().cloned().collect();
@@ -337,8 +356,20 @@ impl GantryCrane {
                 }
             }
 
-            // Wait for the next iteration
-            time::sleep(Duration::from_secs(self.settings.poll_interval as u64)).await;
+            // Wait for the next iteration or message
+            let sleep_fut = time::sleep(Duration::from_secs(self.settings.poll_interval as u64));
+            if channel_open {
+                tokio::select! {
+                    _ = sleep_fut => (),
+                    msg = rx.recv() => {
+                        if msg.is_none() {
+                            channel_open = false;
+                        }
+                    },
+                }
+            } else {
+                sleep_fut.await;
+            }
         }
     }
 
