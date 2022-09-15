@@ -119,7 +119,7 @@ impl GantryCrane {
                         }
 
                         log::debug!("Unpublishing stale container '{}'", container_name);
-                        let _ = self
+                        _ = self
                             .mqtt
                             .publish(&container_name[1..], "", true, Some(1))
                             .await;

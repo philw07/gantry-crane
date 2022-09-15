@@ -163,7 +163,7 @@ impl MqttClient {
 
     async fn publish_state(&self, state: bool) {
         let payload = if state { STATE_ONLINE } else { STATE_OFFLINE };
-        let _ = self
+        _ = self
             .publish(STATE_TOPIC, payload, true, Some(mqtt::QOS_1))
             .await;
     }
