@@ -5,10 +5,11 @@ mod mqtt;
 mod settings;
 mod util;
 
+use anyhow::Result;
 use gantry_crane::GantryCrane;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<()> {
     init_logging();
 
     let app = GantryCrane::new()?;

@@ -1,5 +1,6 @@
 use std::{borrow::BorrowMut, collections::HashMap, rc::Rc, time::Duration};
 
+use anyhow::Result;
 use bollard::{
     container::{ListContainersOptions, Stats, StatsOptions},
     service::{ContainerInspectResponse, EventActor, EventMessageTypeEnum},
@@ -39,7 +40,7 @@ pub struct GantryCrane {
 }
 
 impl GantryCrane {
-    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new() -> Result<Self> {
         match Docker::connect_with_local_defaults() {
             Ok(docker) => {
                 let settings = Settings::new()?;
@@ -55,7 +56,7 @@ impl GantryCrane {
         }
     }
 
-    pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn run(&self) -> Result<()> {
         let mut result = Ok(());
         log::info!("Starting {} {}", APP_NAME, APP_VERSION);
 
@@ -90,7 +91,7 @@ impl GantryCrane {
         result
     }
 
-    async fn handle_signals(&self) -> Result<(), Box<dyn std::error::Error>> {
+    async fn handle_signals(&self) -> Result<()> {
         let mut sigint = signal(SignalKind::interrupt())?;
         let mut sigterm = signal(SignalKind::terminate())?;
 
@@ -210,7 +211,7 @@ impl GantryCrane {
     }
 
     /// Adds all containers from docker
-    async fn get_available_containers(&self) -> Result<(), Box<dyn std::error::Error>> {
+    async fn get_available_containers(&self) -> Result<()> {
         let options = ListContainersOptions::<String> {
             all: true,
             limit: None,
