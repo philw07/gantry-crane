@@ -380,7 +380,7 @@ impl GantryCrane {
         inspect: ContainerInspectResponse,
         image: Option<String>,
     ) {
-        let mut container = Container::new(self.mqtt.clone(), stats, inspect, image);
+        let container = Container::new(self.mqtt.clone(), stats, inspect, image);
         container.publish().await;
         self.add_container(container).await;
     }

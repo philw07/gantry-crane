@@ -16,8 +16,6 @@ use crate::{
 pub struct Container {
     #[serde(skip)]
     mqtt: Rc<MqttClient>,
-    #[serde(skip)]
-    last_published: Option<String>,
 
     #[serde(serialize_with = "serialize_name")]
     name: String,
@@ -52,7 +50,6 @@ impl Container {
 
         let mut container = Container {
             mqtt,
-            last_published: None,
 
             name: stats.name.clone(),
             image: image.unwrap_or_else(|| UNKNOWN.into()),
@@ -102,14 +99,10 @@ impl Container {
         }
     }
 
-    pub async fn publish(&mut self) {
+    pub async fn publish(&self) {
         match serde_json::to_string(&self) {
             Ok(json) => {
-                if self.last_published.is_none() || self.last_published.as_ref().unwrap() != &json {
-                    if let Ok(()) = self.mqtt.publish(&self.name[1..], &json, true, None).await {
-                        self.last_published = Some(json);
-                    }
-                }
+                _ = self.mqtt.publish(&self.name[1..], &json, true, None).await;
             }
             Err(e) => {
                 log::error!("Failed to serialize container '{}': {}", self.name, e)
