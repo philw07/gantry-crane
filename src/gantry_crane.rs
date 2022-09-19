@@ -1,4 +1,4 @@
-use std::{borrow::BorrowMut, collections::HashMap, rc::Rc, time::Duration};
+use std::{borrow::Borrow, collections::HashMap, rc::Rc, time::Duration};
 
 use anyhow::Result;
 use bollard::{
@@ -28,6 +28,7 @@ use crate::{
         SET_STATE_TOPIC,
     },
     container::Container,
+    events::{Event, EventChannel},
     mqtt::MqttClient,
     settings::Settings,
 };
@@ -36,6 +37,7 @@ pub struct GantryCrane {
     docker: Docker,
     settings: Settings,
     mqtt: Rc<MqttClient>,
+    event_channel: EventChannel,
     containers: RwLock<HashMap<String, Container>>,
 }
 
@@ -49,6 +51,7 @@ impl GantryCrane {
                     docker,
                     settings,
                     mqtt: Rc::new(mqtt),
+                    event_channel: EventChannel::new(),
                     containers: RwLock::new(HashMap::new()),
                 })
             }
@@ -386,6 +389,7 @@ impl GantryCrane {
     async fn add_container(&self, container: Container) {
         log::info!("Adding new container '{}'", container.get_name());
         {
+            let event_container = container.borrow().into();
             let mut containers = self.containers.write().await;
             if let Some(old_container) = containers.insert(container.get_name().into(), container) {
                 log::debug!(
@@ -393,23 +397,21 @@ impl GantryCrane {
                     old_container.get_name()
                 );
             }
+            self.event_channel
+                .send(Event::ContainerCreated(event_container));
         }
     }
 
     async fn remove_container(&self, name: &str) -> Option<Container> {
         log::info!("Removing container '{}'", name);
-        let mut ret;
-        {
-            let mut containers = self.containers.write().await;
-            ret = containers.remove(name);
-        }
-
-        // Unpublish container
-        if let Some(container) = ret.borrow_mut() {
+        let container_opt = { self.containers.write().await.remove(name) };
+        if let Some(container) = container_opt.borrow() {
             container.unpublish().await;
+            self.event_channel
+                .send(Event::ContainerRemoved(container.into()));
         }
 
-        ret
+        container_opt
     }
 
     async fn rename_container(&self, old_name: &str, new_name: String) {

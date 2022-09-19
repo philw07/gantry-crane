@@ -1,5 +1,6 @@
 mod constants;
 mod container;
+mod events;
 mod gantry_crane;
 mod mqtt;
 mod settings;
