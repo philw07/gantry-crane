@@ -1,33 +1,26 @@
-use std::{cell::Cell, collections::HashSet, time::Duration};
+use std::{cell::Cell, collections::HashSet, fmt::Debug, sync::Arc, time::Duration};
 
-use futures::{Stream, StreamExt};
+use futures::StreamExt;
 use paho_mqtt as mqtt;
 use tokio::sync::RwLock;
 
 use crate::{
     constants::{APP_NAME, AVAILABILITY_TOPIC, BASE_TOPIC, STATE_OFFLINE, STATE_ONLINE},
+    events::{Event, EventSender},
     settings::Settings,
 };
 
+#[derive(Debug, Clone)]
 pub struct MqttMessage {
     pub topic: String,
     pub payload: String,
     pub retained: bool,
 }
 
-impl MqttMessage {
-    pub fn topic_stripped(&self) -> &str {
-        let topic = &self.topic;
-        topic
-            .strip_prefix(&format!("{}/", BASE_TOPIC))
-            .unwrap_or(&self.topic)
-    }
-}
-
 pub struct MqttClient {
     client: mqtt::AsyncClient,
     receiver: Cell<Option<mqtt::AsyncReceiver<Option<mqtt::Message>>>>,
-    published: RwLock<HashSet<String>>,
+    published: Arc<RwLock<HashSet<String>>>,
 }
 
 impl MqttClient {
@@ -51,11 +44,11 @@ impl MqttClient {
         Ok(MqttClient {
             client,
             receiver,
-            published: RwLock::new(HashSet::new()),
+            published: Arc::new(RwLock::new(HashSet::new())),
         })
     }
 
-    pub async fn connect(&self) -> Result<(), mqtt::Error> {
+    pub async fn connect(&self, event_tx: EventSender) -> Result<(), mqtt::Error> {
         let will = mqtt::Message::new_retained(
             format!("{}/{}", BASE_TOPIC, AVAILABILITY_TOPIC),
             STATE_OFFLINE,
@@ -72,6 +65,7 @@ impl MqttClient {
             Ok(_) => {
                 log::info!("Connected to MQTT server");
                 self.publish_state(true).await;
+                self.listen(event_tx);
                 Ok(())
             }
             Err(e) => {
@@ -95,38 +89,29 @@ impl MqttClient {
         }
     }
 
-    pub async fn subscribe(&self) -> Option<impl Stream<Item = Option<MqttMessage>> + '_> {
-        let topic = format!("{}/#", BASE_TOPIC);
-
-        // Take receiver from cell
-        match self.receiver.take() {
-            Some(stream) => {
-                // Subscribe
-                match self.client.subscribe(&topic, mqtt::QOS_1).await {
-                    Ok(_) => {
-                        return Some(stream.filter_map(|msg| async {
-                            if let Some(msg) = msg {
-                                if !self.published.read().await.contains(msg.topic()) {
-                                    return Some(Some(MqttMessage {
-                                        topic: msg.topic().into(),
-                                        payload: msg.payload_str().into(),
-                                        retained: msg.retained(),
-                                    }));
-                                }
-                            }
-                            None
-                        }));
-                    }
-                    Err(e) => log::error!("Failed to subscribe to MQTT topic '{}': {}", topic, e),
-                }
-
-                // Put receiver back into cell
-                self.receiver.replace(Some(stream));
-            }
-            None => log::error!("MQTT receiver was None"),
+    pub async fn subscribe(&self, topic: &str) {
+        if let Err(e) = self.client.subscribe(topic, mqtt::QOS_0).await {
+            log::error!("Failed to subscribe to topic '{}': {}", topic, e);
         }
+    }
 
-        None
+    fn listen(&self, event_tx: EventSender) {
+        if let Some(mut receiver) = self.receiver.take() {
+            let published_topics = self.published.clone();
+            tokio::spawn(async move {
+                while let Some(Some(msg)) = receiver.next().await {
+                    if !published_topics.read().await.contains(msg.topic()) {
+                        if let Err(e) = event_tx.send(Event::MqttMessageReceived(MqttMessage {
+                            topic: msg.topic().into(),
+                            payload: msg.payload_str().into(),
+                            retained: msg.retained(),
+                        })) {
+                            log::error!("Failed to send MQTT message event: {}", e);
+                        }
+                    }
+                }
+            });
+        }
     }
 
     pub async fn publish(

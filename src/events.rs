@@ -1,6 +1,6 @@
 use tokio::sync::broadcast::{self, Receiver, Sender};
 
-use crate::container::Container;
+use crate::{container::Container, mqtt::MqttMessage};
 
 pub type EventSender = Sender<Event>;
 pub type EventReceiver = Receiver<Event>;
@@ -36,6 +36,7 @@ impl EventChannel {
 pub enum Event {
     ContainerCreated(ContainerEventInfo),
     ContainerRemoved(ContainerEventInfo),
+    MqttMessageReceived(MqttMessage),
 }
 
 #[derive(Debug, Clone)]
