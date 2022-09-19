@@ -5,7 +5,7 @@ use paho_mqtt as mqtt;
 use tokio::sync::RwLock;
 
 use crate::{
-    constants::{APP_NAME, BASE_TOPIC, STATE_OFFLINE, STATE_ONLINE, STATE_TOPIC},
+    constants::{APP_NAME, AVAILABILITY_TOPIC, BASE_TOPIC, STATE_OFFLINE, STATE_ONLINE},
     settings::Settings,
 };
 
@@ -57,7 +57,7 @@ impl MqttClient {
 
     pub async fn connect(&self) -> Result<(), mqtt::Error> {
         let will = mqtt::Message::new_retained(
-            format!("{}/{}", BASE_TOPIC, STATE_TOPIC),
+            format!("{}/{}", BASE_TOPIC, AVAILABILITY_TOPIC),
             STATE_OFFLINE,
             mqtt::QOS_1,
         );
@@ -136,16 +136,14 @@ impl MqttClient {
         retain: bool,
         qos: Option<i32>,
     ) -> Result<(), mqtt::Error> {
-        let topic = format!("{}/{}", BASE_TOPIC, topic);
-
         // Store topic we are going to publish
-        self.published.write().await.insert(topic.clone());
+        self.published.write().await.insert(topic.into());
 
         // Create message
         let message = if retain {
-            mqtt::Message::new_retained(&topic, payload, qos.unwrap_or(mqtt::QOS_0))
+            mqtt::Message::new_retained(topic, payload, qos.unwrap_or(mqtt::QOS_0))
         } else {
-            mqtt::Message::new(&topic, payload, qos.unwrap_or(mqtt::QOS_0))
+            mqtt::Message::new(topic, payload, qos.unwrap_or(mqtt::QOS_0))
         };
 
         // Publish message
@@ -162,9 +160,8 @@ impl MqttClient {
     }
 
     async fn publish_state(&self, state: bool) {
+        let topic = format!("{}/{}", BASE_TOPIC, AVAILABILITY_TOPIC);
         let payload = if state { STATE_ONLINE } else { STATE_OFFLINE };
-        _ = self
-            .publish(STATE_TOPIC, payload, true, Some(mqtt::QOS_1))
-            .await;
+        _ = self.publish(&topic, payload, true, Some(mqtt::QOS_1)).await;
     }
 }

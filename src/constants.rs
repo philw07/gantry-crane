@@ -4,7 +4,7 @@ pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const PRECISION: u32 = 2;
 
 pub const BASE_TOPIC: &str = "gantry-crane";
-pub const STATE_TOPIC: &str = "availability";
+pub const AVAILABILITY_TOPIC: &str = "availability";
 pub const SET_STATE_TOPIC: &str = "set";
 pub const STATE_ONLINE: &str = "online";
 pub const STATE_OFFLINE: &str = "offline";

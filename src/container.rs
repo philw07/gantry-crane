@@ -7,7 +7,7 @@ use bollard::{
 };
 
 use crate::{
-    constants::{PRECISION, UNKNOWN},
+    constants::{BASE_TOPIC, PRECISION, UNKNOWN},
     mqtt::MqttClient,
     util::round,
 };
@@ -102,7 +102,10 @@ impl Container {
     pub async fn publish(&self) {
         match serde_json::to_string(&self) {
             Ok(json) => {
-                _ = self.mqtt.publish(&self.name[1..], &json, true, None).await;
+                _ = self
+                    .mqtt
+                    .publish(&self.get_topic(), &json, true, None)
+                    .await;
             }
             Err(e) => {
                 log::error!("Failed to serialize container '{}': {}", self.name, e)
@@ -111,9 +114,17 @@ impl Container {
     }
 
     pub async fn unpublish(&self) {
-        if let Err(e) = self.mqtt.publish(&self.name[1..], "", true, Some(1)).await {
+        if let Err(e) = self
+            .mqtt
+            .publish(&self.get_topic(), "", true, Some(1))
+            .await
+        {
             log::error!("Failed to unpublish container '{}': {}", self.name, e);
         }
+    }
+
+    fn get_topic(&self) -> String {
+        format!("{}/{}", BASE_TOPIC, &self.name[1..])
     }
 
     fn parse_state(&mut self, inspect: &ContainerInspectResponse) {

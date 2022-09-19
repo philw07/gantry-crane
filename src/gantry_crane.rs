@@ -22,7 +22,7 @@ use tokio::{
 
 use crate::{
     constants::{
-        APP_NAME, APP_VERSION, DOCKER_EVENT_ACTION_CREATE, DOCKER_EVENT_ACTION_DESTROY,
+        APP_NAME, APP_VERSION, BASE_TOPIC, DOCKER_EVENT_ACTION_CREATE, DOCKER_EVENT_ACTION_DESTROY,
         DOCKER_EVENT_ACTION_PAUSE, DOCKER_EVENT_ACTION_RENAME, DOCKER_EVENT_ACTION_RESTART,
         DOCKER_EVENT_ACTION_START, DOCKER_EVENT_ACTION_STOP, DOCKER_EVENT_ACTION_UNPAUSE,
         SET_STATE_TOPIC,
@@ -119,10 +119,8 @@ impl GantryCrane {
                         }
 
                         log::debug!("Unpublishing stale container '{}'", container_name);
-                        _ = self
-                            .mqtt
-                            .publish(&container_name[1..], "", true, Some(1))
-                            .await;
+                        let topic = format!("{}/{}", BASE_TOPIC, &container_name[1..]);
+                        _ = self.mqtt.publish(&topic, "", true, Some(1)).await;
                     }
                     // Handle container requests
                     else if !msg.retained
