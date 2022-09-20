@@ -1,4 +1,4 @@
-use std::{cell::Cell, collections::HashSet, fmt::Debug, sync::Arc, time::Duration};
+use std::{collections::HashSet, fmt::Debug, sync::Arc, time::Duration};
 
 use futures::StreamExt;
 use paho_mqtt as mqtt;
@@ -6,7 +6,7 @@ use tokio::sync::RwLock;
 
 use crate::{
     constants::{APP_NAME, AVAILABILITY_TOPIC, BASE_TOPIC, STATE_OFFLINE, STATE_ONLINE},
-    events::{Event, EventSender},
+    events::{Event, EventChannel},
     settings::Settings,
 };
 
@@ -15,11 +15,44 @@ pub struct MqttMessage {
     pub topic: String,
     pub payload: String,
     pub retained: bool,
+    pub qos: i32,
+}
+
+impl MqttMessage {
+    pub fn new(topic: String, payload: String, retained: bool, qos: i32) -> Self {
+        Self {
+            topic,
+            payload,
+            retained,
+            qos,
+        }
+    }
+}
+
+impl From<mqtt::Message> for MqttMessage {
+    fn from(msg: mqtt::Message) -> Self {
+        Self {
+            topic: msg.topic().into(),
+            payload: msg.payload_str().into(),
+            retained: msg.retained(),
+            qos: msg.qos(),
+        }
+    }
+}
+
+impl From<MqttMessage> for mqtt::Message {
+    fn from(msg: MqttMessage) -> Self {
+        if msg.retained {
+            mqtt::Message::new_retained(msg.topic, msg.payload, msg.qos)
+        } else {
+            mqtt::Message::new(msg.topic, msg.payload, msg.qos)
+        }
+    }
 }
 
 pub struct MqttClient {
-    client: mqtt::AsyncClient,
-    receiver: Cell<Option<mqtt::AsyncReceiver<Option<mqtt::Message>>>>,
+    client: Arc<mqtt::AsyncClient>,
+    receiver: Arc<RwLock<mqtt::AsyncReceiver<Option<mqtt::Message>>>>,
     published: Arc<RwLock<HashSet<String>>>,
 }
 
@@ -39,16 +72,16 @@ impl MqttClient {
             )
             .finalize();
         let mut client = mqtt::AsyncClient::new(options)?;
-        let receiver = Cell::new(Some(client.get_stream(20)));
+        let receiver = Arc::new(RwLock::new(client.get_stream(20)));
 
         Ok(MqttClient {
-            client,
+            client: Arc::new(client),
             receiver,
             published: Arc::new(RwLock::new(HashSet::new())),
         })
     }
 
-    pub async fn connect(&self, event_tx: EventSender) -> Result<(), mqtt::Error> {
+    pub async fn connect(&self) -> Result<(), mqtt::Error> {
         let will = mqtt::Message::new_retained(
             format!("{}/{}", BASE_TOPIC, AVAILABILITY_TOPIC),
             STATE_OFFLINE,
@@ -65,7 +98,6 @@ impl MqttClient {
             Ok(_) => {
                 log::info!("Connected to MQTT server");
                 self.publish_state(true).await;
-                self.listen(event_tx);
                 Ok(())
             }
             Err(e) => {
@@ -95,58 +127,69 @@ impl MqttClient {
         }
     }
 
-    fn listen(&self, event_tx: EventSender) {
-        if let Some(mut receiver) = self.receiver.take() {
-            let published_topics = self.published.clone();
-            tokio::spawn(async move {
-                while let Some(Some(msg)) = receiver.next().await {
-                    if !published_topics.read().await.contains(msg.topic()) {
-                        if let Err(e) = event_tx.send(Event::MqttMessageReceived(MqttMessage {
-                            topic: msg.topic().into(),
-                            payload: msg.payload_str().into(),
-                            retained: msg.retained(),
-                        })) {
-                            log::error!("Failed to send MQTT message event: {}", e);
+    pub async fn event_loop(&self, event_channel: &EventChannel) {
+        // Task to receive incoming message
+        let published_topics = self.published.clone();
+        let event_tx = event_channel.get_sender();
+        let receiver = self.receiver.clone();
+        let task_recv = tokio::spawn(async move {
+            while let Some(Some(msg)) = receiver.write().await.next().await {
+                if !published_topics.read().await.contains(msg.topic()) {
+                    if let Err(e) = event_tx.send(Event::MqttMessageReceived(msg.into())) {
+                        log::error!("Failed to send MQTT message event: {}", e);
+                    }
+                }
+            }
+        });
+
+        // Task to publish outgoing messages
+        let published_topics = self.published.clone();
+        let mut event_rx = event_channel.get_receiver();
+        let client = self.client.clone();
+        let task_send = tokio::spawn(async move {
+            while let Ok(event) = event_rx.recv().await {
+                if let Event::PublishMqttMessage(msg) = event {
+                    // Store topic we are going to publish
+                    published_topics.write().await.insert(msg.topic.clone());
+
+                    // Publish message
+                    let topic = msg.topic.clone();
+                    match client.publish(msg.into()).await {
+                        Ok(()) => {
+                            log::debug!("Published MQTT message for topic '{}'", topic);
+                        }
+                        Err(e) => {
+                            log::error!("Failed to publish MQTT message: {}", e);
                         }
                     }
                 }
-            });
-        }
-    }
-
-    pub async fn publish(
-        &self,
-        topic: &str,
-        payload: &str,
-        retain: bool,
-        qos: Option<i32>,
-    ) -> Result<(), mqtt::Error> {
-        // Store topic we are going to publish
-        self.published.write().await.insert(topic.into());
-
-        // Create message
-        let message = if retain {
-            mqtt::Message::new_retained(topic, payload, qos.unwrap_or(mqtt::QOS_0))
-        } else {
-            mqtt::Message::new(topic, payload, qos.unwrap_or(mqtt::QOS_0))
-        };
-
-        // Publish message
-        match self.client.publish(message).await {
-            Ok(()) => {
-                log::debug!("Published MQTT message for topic '{}'", topic);
-                Ok(())
             }
-            Err(e) => {
-                log::error!("Failed to publish MQTT message: {}", e);
-                Err(e)
-            }
+        });
+
+        // Wait for any task to end
+        tokio::select! {
+            _ = task_recv => {},
+            _ = task_send => {},
         }
     }
 
     async fn publish_state(&self, state: bool) {
+        // Construct message
         let topic = format!("{}/{}", BASE_TOPIC, AVAILABILITY_TOPIC);
-        let payload = if state { STATE_ONLINE } else { STATE_OFFLINE };
-        _ = self.publish(&topic, payload, true, Some(mqtt::QOS_1)).await;
+        let payload = if state { STATE_ONLINE } else { STATE_OFFLINE }.into();
+        let msg = MqttMessage::new(topic.clone(), payload, true, 1);
+
+        // Store topic we are going to publish
+        self.published.write().await.insert(topic.clone());
+
+        // Publish message
+        match self.client.publish(msg.into()).await {
+            Ok(()) => {
+                log::debug!("Published MQTT message for topic '{}'", topic);
+            }
+            Err(e) => {
+                log::error!("Failed to publish MQTT message: {}", e);
+            }
+        }
     }
 }

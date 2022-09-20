@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, collections::HashMap, rc::Rc, time::Duration};
+use std::{borrow::Borrow, collections::HashMap, time::Duration};
 
 use anyhow::Result;
 use bollard::{
@@ -29,14 +29,14 @@ use crate::{
     },
     container::Container,
     events::{Event, EventChannel},
-    mqtt::MqttClient,
+    mqtt::{MqttClient, MqttMessage},
     settings::Settings,
 };
 
 pub struct GantryCrane {
     docker: Docker,
     settings: Settings,
-    mqtt: Rc<MqttClient>,
+    mqtt: MqttClient,
     event_channel: EventChannel,
     containers: RwLock<HashMap<String, Container>>,
 }
@@ -50,7 +50,7 @@ impl GantryCrane {
                 Ok(GantryCrane {
                     docker,
                     settings,
-                    mqtt: Rc::new(mqtt),
+                    mqtt,
                     event_channel: EventChannel::new(),
                     containers: RwLock::new(HashMap::new()),
                 })
@@ -64,7 +64,7 @@ impl GantryCrane {
         log::info!("Starting {} {}", APP_NAME, APP_VERSION);
 
         // Connect to MQTT
-        self.mqtt.connect(self.event_channel.get_sender()).await?;
+        self.mqtt.connect().await?;
 
         // Get available containers
         match self.get_available_containers().await {
@@ -79,6 +79,7 @@ impl GantryCrane {
                             result = Err(e)
                         }
                     },
+                    _ = self.mqtt.event_loop(&self.event_channel) => log::debug!("mqtt event_loop() ended"),
                     _ = self.handle_mqtt_messages() => log::debug!("handle_mqtt_messages() ended"),
                     _ = self.events_loop(tx) => log::debug!("listen_for_events() ended"),
                     _ = self.poll_loop(rx) => log::debug!("poll_containers() ended"),
@@ -130,7 +131,8 @@ impl GantryCrane {
 
                     log::debug!("Unpublishing stale container '{}'", container_name);
                     let topic = format!("{}/{}", BASE_TOPIC, &container_name[1..]);
-                    _ = self.mqtt.publish(&topic, "", true, Some(1)).await;
+                    let msg = MqttMessage::new(topic, "".into(), true, 1);
+                    self.event_channel.send(Event::PublishMqttMessage(msg));
                 }
                 // Handle container requests
                 else if !msg.retained && subtopics.len() == 3 && subtopics[2] == SET_STATE_TOPIC {
@@ -363,7 +365,7 @@ impl GantryCrane {
         inspect: ContainerInspectResponse,
         image: Option<String>,
     ) {
-        let container = Container::new(self.mqtt.clone(), stats, inspect, image);
+        let container = Container::new(&self.event_channel, stats, inspect, image);
         container.publish().await;
         self.add_container(container).await;
     }

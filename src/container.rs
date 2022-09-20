@@ -1,5 +1,4 @@
 use serde::Serialize;
-use std::rc::Rc;
 
 use bollard::{
     container::{MemoryStatsStats, Stats},
@@ -8,14 +7,15 @@ use bollard::{
 
 use crate::{
     constants::{BASE_TOPIC, PRECISION, UNKNOWN},
-    mqtt::MqttClient,
+    events::{Event, EventChannel, EventSender},
+    mqtt::MqttMessage,
     util::round,
 };
 
 #[derive(Serialize)]
 pub struct Container {
     #[serde(skip)]
-    mqtt: Rc<MqttClient>,
+    event_tx: EventSender,
 
     #[serde(serialize_with = "serialize_name")]
     name: String,
@@ -35,7 +35,7 @@ pub struct Container {
 
 impl Container {
     pub fn new(
-        mqtt: Rc<MqttClient>,
+        event_channel: &EventChannel,
         stats: Stats,
         inspect: ContainerInspectResponse,
         image: Option<String>,
@@ -49,7 +49,7 @@ impl Container {
         }
 
         let mut container = Container {
-            mqtt,
+            event_tx: event_channel.get_sender(),
 
             name: stats.name.clone(),
             image: image.unwrap_or_else(|| UNKNOWN.into()),
@@ -102,10 +102,10 @@ impl Container {
     pub async fn publish(&self) {
         match serde_json::to_string(&self) {
             Ok(json) => {
-                _ = self
-                    .mqtt
-                    .publish(&self.get_topic(), &json, true, None)
-                    .await;
+                let msg = MqttMessage::new(self.get_topic(), json, true, 0);
+                if let Err(e) = self.event_tx.send(Event::PublishMqttMessage(msg)) {
+                    log::error!("Failed to publish container '{}': {}", self.name, e);
+                }
             }
             Err(e) => {
                 log::error!("Failed to serialize container '{}': {}", self.name, e)
@@ -114,11 +114,8 @@ impl Container {
     }
 
     pub async fn unpublish(&self) {
-        if let Err(e) = self
-            .mqtt
-            .publish(&self.get_topic(), "", true, Some(1))
-            .await
-        {
+        let msg = MqttMessage::new(self.get_topic(), "".into(), true, 1);
+        if let Err(e) = self.event_tx.send(Event::PublishMqttMessage(msg)) {
             log::error!("Failed to unpublish container '{}': {}", self.name, e);
         }
     }
@@ -248,7 +245,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, rc::Rc};
+    use std::collections::HashMap;
 
     use bollard::{
         container::{
@@ -261,7 +258,7 @@ mod tests {
         },
     };
 
-    use crate::{constants::UNKNOWN, mqtt::MqttClient, settings::Settings};
+    use crate::{constants::UNKNOWN, events::EventChannel};
 
     use super::Container;
 
@@ -269,7 +266,7 @@ mod tests {
     fn test_new_container() {
         let name = "test_name";
         let image = "test-image";
-        let mqtt = Rc::new(MqttClient::new(&Settings::new().unwrap()).unwrap());
+        let event_channel = EventChannel::new();
 
         let stats = get_stats(name);
         let inspect = ContainerInspectResponse {
@@ -277,18 +274,16 @@ mod tests {
             ..Default::default()
         };
 
-        let container = Container::new(mqtt.clone(), stats, inspect, Some(image.into()));
+        let container = Container::new(&event_channel, stats, inspect, Some(image.into()));
 
         assert_eq!(container.name, name);
         assert_eq!(container.image, image);
-        assert_eq!(container.last_published, None);
-        assert!(Rc::ptr_eq(&container.mqtt, &mqtt));
     }
 
     #[test]
     fn test_new_container_no_image() {
         let name = "other_name";
-        let mqtt = Rc::new(MqttClient::new(&Settings::new().unwrap()).unwrap());
+        let event_channel = EventChannel::new();
 
         let stats = get_stats(name);
         let inspect = ContainerInspectResponse {
@@ -296,18 +291,16 @@ mod tests {
             ..Default::default()
         };
 
-        let container = Container::new(mqtt.clone(), stats, inspect, None);
+        let container = Container::new(&event_channel, stats, inspect, None);
 
         assert_eq!(container.name, name);
         assert_eq!(container.image, UNKNOWN.to_owned());
-        assert_eq!(container.last_published, None);
-        assert!(Rc::ptr_eq(&container.mqtt, &mqtt));
     }
 
     #[test]
     fn test_rename() {
         let name = "original_name";
-        let mqtt = Rc::new(MqttClient::new(&Settings::new().unwrap()).unwrap());
+        let event_channel = EventChannel::new();
 
         let stats = get_stats(name);
         let inspect = ContainerInspectResponse {
@@ -315,7 +308,7 @@ mod tests {
             ..Default::default()
         };
 
-        let mut container = Container::new(mqtt.clone(), stats, inspect, None);
+        let mut container = Container::new(&event_channel, stats, inspect, None);
         assert_eq!(container.name, name);
 
         let new_name = "renamed_name";
@@ -325,13 +318,13 @@ mod tests {
 
     #[test]
     fn test_update() {
-        let mqtt = Rc::new(MqttClient::new(&Settings::new().unwrap()).unwrap());
+        let event_channel = EventChannel::new();
         let mut stats = get_stats("");
         let mut inspect = ContainerInspectResponse {
             ..Default::default()
         };
 
-        let mut container = Container::new(mqtt.clone(), stats.clone(), inspect.clone(), None);
+        let mut container = Container::new(&event_channel, stats.clone(), inspect.clone(), None);
 
         // Update state and health
         let status = ContainerStateStatusEnum::DEAD;
@@ -409,12 +402,12 @@ mod tests {
 
     #[test]
     fn test_parse_state() {
-        let mqtt = Rc::new(MqttClient::new(&Settings::new().unwrap()).unwrap());
+        let event_channel = EventChannel::new();
         let stats = get_stats("");
         let mut inspect = ContainerInspectResponse {
             ..Default::default()
         };
-        let mut container = Container::new(mqtt.clone(), stats.clone(), inspect.clone(), None);
+        let mut container = Container::new(&event_channel, stats.clone(), inspect.clone(), None);
 
         assert_eq!(container.state, UNKNOWN);
 
@@ -453,12 +446,12 @@ mod tests {
 
     #[test]
     fn test_parse_health() {
-        let mqtt = Rc::new(MqttClient::new(&Settings::new().unwrap()).unwrap());
+        let event_channel = EventChannel::new();
         let stats = get_stats("");
         let mut inspect = ContainerInspectResponse {
             ..Default::default()
         };
-        let mut container = Container::new(mqtt.clone(), stats.clone(), inspect.clone(), None);
+        let mut container = Container::new(&event_channel, stats.clone(), inspect.clone(), None);
 
         assert_eq!(container.health, UNKNOWN);
 
@@ -507,12 +500,12 @@ mod tests {
 
     #[test]
     fn test_parse_cpu() {
-        let mqtt = Rc::new(MqttClient::new(&Settings::new().unwrap()).unwrap());
+        let event_channel = EventChannel::new();
         let mut stats = get_stats("");
         let inspect = ContainerInspectResponse {
             ..Default::default()
         };
-        let mut container = Container::new(mqtt.clone(), stats.clone(), inspect.clone(), None);
+        let mut container = Container::new(&event_channel, stats.clone(), inspect.clone(), None);
 
         stats.cpu_stats.cpu_usage.total_usage = 20;
         stats.cpu_stats.system_cpu_usage = Some(200);
@@ -544,12 +537,12 @@ mod tests {
 
     #[test]
     fn test_parse_mem() {
-        let mqtt = Rc::new(MqttClient::new(&Settings::new().unwrap()).unwrap());
+        let event_channel = EventChannel::new();
         let mut stats = get_stats("");
         let inspect = ContainerInspectResponse {
             ..Default::default()
         };
-        let mut container = Container::new(mqtt.clone(), stats.clone(), inspect.clone(), None);
+        let mut container = Container::new(&event_channel, stats.clone(), inspect.clone(), None);
 
         assert_eq!(container.mem_mb, 0.0);
         assert_eq!(container.mem_percentage, 0.0);
@@ -572,12 +565,12 @@ mod tests {
 
     #[test]
     fn test_parse_network() {
-        let mqtt = Rc::new(MqttClient::new(&Settings::new().unwrap()).unwrap());
+        let event_channel = EventChannel::new();
         let mut stats = get_stats("");
         let inspect = ContainerInspectResponse {
             ..Default::default()
         };
-        let mut container = Container::new(mqtt.clone(), stats.clone(), inspect.clone(), None);
+        let mut container = Container::new(&event_channel, stats.clone(), inspect.clone(), None);
 
         assert_eq!(container.net_rx_mb, 0.0);
         assert_eq!(container.net_tx_mb, 0.0);
@@ -612,12 +605,12 @@ mod tests {
 
     #[test]
     fn test_parse_block_io() {
-        let mqtt = Rc::new(MqttClient::new(&Settings::new().unwrap()).unwrap());
+        let event_channel = EventChannel::new();
         let mut stats = get_stats("");
         let inspect = ContainerInspectResponse {
             ..Default::default()
         };
-        let mut container = Container::new(mqtt.clone(), stats.clone(), inspect.clone(), None);
+        let mut container = Container::new(&event_channel, stats.clone(), inspect.clone(), None);
 
         assert_eq!(container.block_rx_mb, 0.0);
         assert_eq!(container.block_tx_mb, 0.0);

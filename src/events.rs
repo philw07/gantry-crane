@@ -37,6 +37,7 @@ pub enum Event {
     ContainerCreated(ContainerEventInfo),
     ContainerRemoved(ContainerEventInfo),
     MqttMessageReceived(MqttMessage),
+    PublishMqttMessage(MqttMessage),
 }
 
 #[derive(Debug, Clone)]
