@@ -10,7 +10,7 @@ use crate::{
     settings::Settings,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MqttMessage {
     pub topic: String,
     pub payload: String,

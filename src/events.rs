@@ -32,7 +32,7 @@ impl EventChannel {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     ContainerCreated(ContainerEventInfo),
     ContainerRemoved(ContainerEventInfo),
@@ -40,7 +40,7 @@ pub enum Event {
     PublishMqttMessage(MqttMessage),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContainerEventInfo {
     pub name: String,
 }

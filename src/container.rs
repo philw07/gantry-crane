@@ -258,7 +258,11 @@ mod tests {
         },
     };
 
-    use crate::{constants::UNKNOWN, events::EventChannel};
+    use crate::{
+        constants::{BASE_TOPIC, UNKNOWN},
+        events::{Event, EventChannel},
+        mqtt::MqttMessage,
+    };
 
     use super::Container;
 
@@ -693,6 +697,80 @@ mod tests {
         container.parse_block_io(&stats);
         assert_eq!(container.block_rx_mb, 15.0);
         assert_eq!(container.block_tx_mb, 10.0);
+    }
+
+    #[test]
+    fn test_get_topic() {
+        let name = "/test_name";
+        let image = "test-image";
+        let event_channel = EventChannel::new();
+
+        let stats = get_stats(name);
+        let inspect = ContainerInspectResponse {
+            name: Some(name.into()),
+            ..Default::default()
+        };
+
+        let container = Container::new(&event_channel, stats, inspect, Some(image.into()));
+        let topic = container.get_topic();
+        assert_eq!(topic.matches('/').count(), 1);
+        assert_eq!(
+            topic.split('/').collect::<Vec<_>>(),
+            [BASE_TOPIC, &name[1..]]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_publish() {
+        let name = "test_name";
+        let image = "test-image";
+        let event_channel = EventChannel::new();
+
+        let stats = get_stats(name);
+        let inspect = ContainerInspectResponse {
+            name: Some(name.into()),
+            ..Default::default()
+        };
+
+        let container = Container::new(&event_channel, stats, inspect, Some(image.into()));
+
+        let mut recv = event_channel.get_receiver();
+        container.publish().await;
+        assert_eq!(recv.len(), 1);
+        let expected_msg = MqttMessage::new(
+            container.get_topic().into(),
+            serde_json::to_string(&container).unwrap().into(),
+            true,
+            0,
+        );
+        assert_eq!(
+            recv.recv().await,
+            Ok(Event::PublishMqttMessage(expected_msg))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_unpublish() {
+        let name = "test_name";
+        let image = "test-image";
+        let event_channel = EventChannel::new();
+
+        let stats = get_stats(name);
+        let inspect = ContainerInspectResponse {
+            name: Some(name.into()),
+            ..Default::default()
+        };
+
+        let container = Container::new(&event_channel, stats, inspect, Some(image.into()));
+
+        let mut recv = event_channel.get_receiver();
+        container.unpublish().await;
+        assert_eq!(recv.len(), 1);
+        let expected_msg = MqttMessage::new(container.get_topic().into(), "".into(), true, 1);
+        assert_eq!(
+            recv.recv().await,
+            Ok(Event::PublishMqttMessage(expected_msg))
+        );
     }
 
     fn get_stats(name: &str) -> Stats {
