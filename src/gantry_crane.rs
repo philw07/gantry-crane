@@ -8,6 +8,7 @@ use bollard::{
     Docker,
 };
 use futures::{
+    future::select_all,
     stream::{FuturesOrdered, FuturesUnordered},
     StreamExt,
 };
@@ -29,6 +30,7 @@ use crate::{
     },
     container::Container,
     events::{Event, EventChannel},
+    homeassistant::HomeAssistantIntegration,
     mqtt::{MqttClient, MqttMessage},
     settings::Settings,
 };
@@ -69,16 +71,44 @@ impl GantryCrane {
         // Get available containers
         match self.get_available_containers().await {
             Ok(()) => {
-                let (tx, rx) = tokio::sync::mpsc::channel::<()>(5);
+                let mut tasks = Vec::new();
 
-                // Run tasks endlessly
-                tokio::select! {
-                    res = self.handle_signals() => {
-                        if let Err(e) = res {
-                            log::error!("An error occurred trying to setup signal handlers: {}", e);
-                            result = Err(e)
+                // Setup signal handler
+                tasks.push(tokio::spawn(async {
+                    if let Err(e) = Self::handle_signals().await {
+                        log::error!("An error occurred trying to setup signal handlers: {}", e);
+                    }
+                }));
+
+                // Setup home assistant integration
+                if self.settings.homeassistant.active {
+                    let ha_settings = self.settings.homeassistant.clone();
+                    let mut ha = HomeAssistantIntegration::new(ha_settings, &self.event_channel);
+                    tasks.push(tokio::spawn(async move {
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        ha.run().await
+                    }));
+                }
+
+                // Trannsmit initial containers after a short delay to make sure everyone gets them
+                let initial_containers: Vec<_> = {
+                    let containers = self.containers.read().await;
+                    containers.iter().map(|v| v.1.clone()).collect()
+                };
+                let tx = self.event_channel.get_sender();
+                tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    for container in initial_containers {
+                        if let Err(e) = tx.send(Event::ContainerCreated(container.into())) {
+                            log::error!("Failed to send event: {}", e);
                         }
-                    },
+                    }
+                });
+
+                // Run tasks until the first one finishes
+                let (tx, rx) = tokio::sync::mpsc::channel::<()>(5);
+                tokio::select! {
+                    _ = select_all(tasks) => (),
                     _ = self.mqtt.event_loop(&self.event_channel) => log::debug!("mqtt event_loop() ended"),
                     _ = self.handle_mqtt_messages() => log::debug!("handle_mqtt_messages() ended"),
                     _ = self.events_loop(tx) => log::debug!("listen_for_events() ended"),
@@ -95,7 +125,7 @@ impl GantryCrane {
         result
     }
 
-    async fn handle_signals(&self) -> Result<()> {
+    async fn handle_signals() -> Result<()> {
         let mut sigint = signal(SignalKind::interrupt())?;
         let mut sigterm = signal(SignalKind::terminate())?;
 
@@ -239,6 +269,7 @@ impl GantryCrane {
 
     /// Listens to docker container events endlessly and creates, removes or renames containers accordingly.
     async fn events_loop(&self, tx: Sender<()>) {
+        // Listen to events
         let mut stream = self.docker.events(Some(EventsOptions::<String> {
             until: None,
             ..Default::default()

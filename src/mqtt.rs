@@ -133,43 +133,55 @@ impl MqttClient {
         let event_tx = event_channel.get_sender();
         let receiver = self.receiver.clone();
         let task_recv = tokio::spawn(async move {
-            while let Some(Some(msg)) = receiver.write().await.next().await {
-                if !published_topics.read().await.contains(msg.topic()) {
-                    if let Err(e) = event_tx.send(Event::MqttMessageReceived(msg.into())) {
-                        log::error!("Failed to send MQTT message event: {}", e);
+            while let Some(msg_opt) = receiver.write().await.next().await {
+                if let Some(msg) = msg_opt {
+                    if !published_topics.read().await.contains(msg.topic()) {
+                        if let Err(e) = event_tx.send(Event::MqttMessageReceived(msg.into())) {
+                            log::error!("Failed to send MQTT message event: {}", e);
+                        }
                     }
+                } else {
+                    // None means disconnected from MQTT
+                    log::debug!("Disconnected from MQTT");
                 }
             }
         });
 
-        // Task to publish outgoing messages
+        // Task to handle events
         let published_topics = self.published.clone();
         let mut event_rx = event_channel.get_receiver();
         let client = self.client.clone();
         let task_send = tokio::spawn(async move {
             while let Ok(event) = event_rx.recv().await {
-                if let Event::PublishMqttMessage(msg) = event {
-                    // Store topic we are going to publish
-                    published_topics.write().await.insert(msg.topic.clone());
+                match event {
+                    Event::PublishMqttMessage(msg) => {
+                        // Store topic we are going to publish
+                        published_topics.write().await.insert(msg.topic.clone());
 
-                    // Publish message
-                    let topic = msg.topic.clone();
-                    match client.publish(msg.into()).await {
-                        Ok(()) => {
-                            log::debug!("Published MQTT message for topic '{}'", topic);
-                        }
-                        Err(e) => {
-                            log::error!("Failed to publish MQTT message: {}", e);
+                        // Publish message
+                        let topic = msg.topic.clone();
+                        match client.publish(msg.into()).await {
+                            Ok(()) => {
+                                log::debug!("Published MQTT message for topic '{}'", topic);
+                            }
+                            Err(e) => {
+                                log::error!("Failed to publish MQTT message: {}", e);
+                            }
                         }
                     }
+                    Event::SubscribeMqttTopic(topic) => {
+                        log::debug!("Subscribing to MQTT topic '{}'", topic);
+                        client.subscribe(topic, 0);
+                    }
+                    _ => {}
                 }
             }
         });
 
         // Wait for any task to end
         tokio::select! {
-            _ = task_recv => {},
-            _ = task_send => {},
+            _ = task_recv => (),
+            _ = task_send => (),
         }
     }
 

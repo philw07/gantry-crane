@@ -12,7 +12,7 @@ use crate::{
     util::round,
 };
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub struct Container {
     #[serde(skip)]
     event_tx: EventSender,

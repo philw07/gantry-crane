@@ -4,3 +4,8 @@ poll_interval = 60
 host = "localhost"
 port = 1883
 # client_id = "gantry-crane-1"
+
+[homeassistant]
+active = true
+base_topic = "homeassistant"
+node_id = "gantry-crane"

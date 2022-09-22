@@ -2,6 +2,7 @@ mod constants;
 mod container;
 mod events;
 mod gantry_crane;
+mod homeassistant;
 mod mqtt;
 mod settings;
 mod util;

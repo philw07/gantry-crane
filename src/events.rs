@@ -13,7 +13,7 @@ pub struct EventChannel {
 
 impl EventChannel {
     pub fn new() -> Self {
-        let (tx, rx) = broadcast::channel::<Event>(32);
+        let (tx, rx) = broadcast::channel::<Event>(64);
         Self { rx, tx }
     }
 
@@ -38,6 +38,7 @@ pub enum Event {
     ContainerRemoved(ContainerEventInfo),
     MqttMessageReceived(MqttMessage),
     PublishMqttMessage(MqttMessage),
+    SubscribeMqttTopic(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,6 +48,14 @@ pub struct ContainerEventInfo {
 
 impl From<&Container> for ContainerEventInfo {
     fn from(c: &Container) -> Self {
+        Self {
+            name: c.get_name().into(),
+        }
+    }
+}
+
+impl From<Container> for ContainerEventInfo {
+    fn from(c: Container) -> Self {
         Self {
             name: c.get_name().into(),
         }
