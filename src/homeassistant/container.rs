@@ -33,7 +33,10 @@ impl HomeAssistantContainer {
             event_tx,
             base_topic,
             node_id,
-            device: Arc::new(Device::new(container_name[1..].into())),
+            device: Arc::new(Device::new(
+                container_name[1..].into(),
+                Some("Docker".into()),
+            )),
             sensors: Vec::new(),
             buttons: Vec::new(),
         }

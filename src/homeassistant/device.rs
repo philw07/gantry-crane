@@ -13,12 +13,12 @@ pub struct Device {
 }
 
 impl Device {
-    pub fn new(name: String) -> Self {
+    pub fn new(name: String, manufacturer: Option<String>) -> Self {
         let id = format!("gc_{}", name.replace(' ', "_"));
         Self {
             name,
             identifiers: vec![id],
-            manufacturer: None,
+            manufacturer,
             model: None,
             sw_version: None,
         }
