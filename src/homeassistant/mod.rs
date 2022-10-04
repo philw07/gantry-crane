@@ -7,9 +7,11 @@ use crate::{
 
 use self::container::HomeAssistantContainer;
 
-pub mod container;
-pub mod device;
-pub mod sensor;
+mod button;
+mod container;
+mod device;
+mod entity;
+mod sensor;
 
 pub struct HomeAssistantIntegration {
     containers: HashMap<String, HomeAssistantContainer>,
@@ -29,6 +31,8 @@ impl HomeAssistantIntegration {
     }
 
     pub async fn run(&mut self) {
+        log::info!("Running Home Assistant integration");
+
         // Subscribe to Home Assistant discovery topic
         let topic = format!("{}/+/gantry-crane/+/config", self.settings.base_topic);
         if let Err(e) = self.event_tx.send(Event::SubscribeMqttTopic(topic)) {
@@ -45,12 +49,12 @@ impl HomeAssistantIntegration {
                         self.settings.base_topic.clone(),
                         self.settings.node_id.clone(),
                     );
-                    container.publish().await;
+                    container.publish();
                     self.containers.insert(container_info.name, container);
                 }
                 Event::ContainerRemoved(container_info) => {
                     if let Some(container) = self.containers.remove(&container_info.name) {
-                        container.unpublish().await;
+                        container.unpublish();
                     } else {
                         log::warn!("Received container remove event for container '{}', but HA container doesn't exist", container_info.name);
                     }
