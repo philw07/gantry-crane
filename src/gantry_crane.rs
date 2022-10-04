@@ -47,13 +47,14 @@ impl GantryCrane {
     pub fn new() -> Result<Self> {
         match Docker::connect_with_local_defaults() {
             Ok(docker) => {
+                let event_channel = EventChannel::new();
                 let settings = Settings::new()?;
-                let mqtt = MqttClient::new(&settings)?;
+                let mqtt = MqttClient::new(&event_channel, &settings)?;
                 Ok(GantryCrane {
                     docker,
                     settings,
                     mqtt,
-                    event_channel: EventChannel::new(),
+                    event_channel,
                     containers: RwLock::new(HashMap::new()),
                 })
             }
@@ -80,36 +81,33 @@ impl GantryCrane {
                     }
                 }));
 
+                // Run MQTT client event loop
+                let mqtt_fut = self.mqtt.event_loop();
+
                 // Setup home assistant integration
                 if self.settings.homeassistant.active {
                     let ha_settings = self.settings.homeassistant.clone();
                     let mut ha = HomeAssistantIntegration::new(ha_settings, &self.event_channel);
-                    tasks.push(tokio::spawn(async move {
-                        tokio::time::sleep(Duration::from_secs(1)).await;
-                        ha.run().await
-                    }));
+                    tasks.push(tokio::spawn(async move { ha.run().await }));
                 }
 
-                // Trannsmit initial containers after a short delay to make sure everyone gets them
+                // Trannsmit initial containers
                 let initial_containers: Vec<_> = {
                     let containers = self.containers.read().await;
                     containers.iter().map(|v| v.1.clone()).collect()
                 };
                 let tx = self.event_channel.get_sender();
-                tokio::spawn(async move {
-                    tokio::time::sleep(Duration::from_secs(1)).await;
-                    for container in initial_containers {
-                        if let Err(e) = tx.send(Event::ContainerCreated(container.into())) {
-                            log::error!("Failed to send event: {}", e);
-                        }
+                for container in initial_containers {
+                    if let Err(e) = tx.send(Event::ContainerCreated(container.into())) {
+                        log::error!("Failed to send event: {}", e);
                     }
-                });
+                }
 
                 // Run tasks until the first one finishes
                 let (tx, rx) = tokio::sync::mpsc::channel::<()>(5);
                 tokio::select! {
                     _ = select_all(tasks) => (),
-                    _ = self.mqtt.event_loop(&self.event_channel) => log::debug!("mqtt event_loop() ended"),
+                    _ = mqtt_fut => log::debug!("MQTT event loop ended"),
                     _ = self.handle_mqtt_messages() => log::debug!("handle_mqtt_messages() ended"),
                     _ = self.events_loop(tx) => log::debug!("listen_for_events() ended"),
                     _ = self.poll_loop(rx) => log::debug!("poll_containers() ended"),

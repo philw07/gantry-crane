@@ -6,7 +6,7 @@ use tokio::sync::RwLock;
 
 use crate::{
     constants::{APP_NAME, AVAILABILITY_TOPIC, BASE_TOPIC, STATE_OFFLINE, STATE_ONLINE},
-    events::{Event, EventChannel},
+    events::{Event, EventChannel, EventReceiver, EventSender},
     settings::Settings,
 };
 
@@ -54,10 +54,12 @@ pub struct MqttClient {
     client: Arc<mqtt::AsyncClient>,
     receiver: Arc<RwLock<mqtt::AsyncReceiver<Option<mqtt::Message>>>>,
     published: Arc<RwLock<HashSet<String>>>,
+    event_tx: EventSender,
+    event_rx: Arc<RwLock<EventReceiver>>,
 }
 
 impl MqttClient {
-    pub fn new(settings: &Settings) -> Result<Self, mqtt::Error> {
+    pub fn new(event_channel: &EventChannel, settings: &Settings) -> Result<Self, mqtt::Error> {
         let uri = format!("tcp://{}:{}", settings.mqtt.host, settings.mqtt.port);
         let options = mqtt::CreateOptionsBuilder::new()
             .mqtt_version(mqtt::MQTT_VERSION_3_1_1)
@@ -78,6 +80,8 @@ impl MqttClient {
             client: Arc::new(client),
             receiver,
             published: Arc::new(RwLock::new(HashSet::new())),
+            event_tx: event_channel.get_sender(),
+            event_rx: Arc::new(RwLock::new(event_channel.get_receiver())),
         })
     }
 
@@ -127,15 +131,16 @@ impl MqttClient {
         }
     }
 
-    pub async fn event_loop(&self, event_channel: &EventChannel) {
+    pub async fn event_loop(&self) {
         let client = self.client.clone();
         let published_topics = self.published.clone();
-        let event_tx = event_channel.get_sender();
-        let mut event_rx = event_channel.get_receiver();
+        let event_tx = self.event_tx.clone();
+        let event_rx = self.event_rx.clone();
         let receiver = self.receiver.clone();
 
         _ = tokio::spawn(async move {
             let mut receiver = receiver.write().await;
+            let mut event_rx = event_rx.write().await;
             loop {
                 tokio::select! {
                     // Handle incoming MQTT messages
@@ -148,7 +153,7 @@ impl MqttClient {
                             }
                         } else if let Some(None) = res {
                             // None means disconnected from MQTT
-                            log::debug!("Disconnected from MQTT");
+                            log::debug!("Disconnected from MQTT in event loop");
                         } else {
                             log::debug!("Received None from MQTT client receiver");
                             break;
