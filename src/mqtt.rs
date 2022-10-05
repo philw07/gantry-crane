@@ -109,7 +109,7 @@ impl MqttClient {
         match self.client.connect(options).await {
             Ok(_) => {
                 log::info!("Connected to MQTT server");
-                self.publish_state(true).await;
+                self.publish_state(Some(true)).await;
                 Ok(())
             }
             Err(e) => {
@@ -119,8 +119,11 @@ impl MqttClient {
         }
     }
 
-    pub async fn disconnect(&self) -> bool {
-        self.publish_state(false).await;
+    pub async fn disconnect(&self, clean: bool) -> bool {
+        // Remove or publish availability topic
+        let state = if clean { None } else { Some(false) };
+        self.publish_state(state).await;
+
         match self.client.disconnect(None).await {
             Ok(_) => {
                 log::info!("Disconnected from MQTT");
@@ -205,10 +208,19 @@ impl MqttClient {
         }).await;
     }
 
-    async fn publish_state(&self, state: bool) {
+    async fn publish_state(&self, state: Option<bool>) {
         // Construct message
         let topic = format!("{}/{}", BASE_TOPIC, AVAILABILITY_TOPIC);
-        let payload = if state { STATE_ONLINE } else { STATE_OFFLINE }.into();
+        let payload = if let Some(value) = state {
+            if value {
+                STATE_ONLINE
+            } else {
+                STATE_OFFLINE
+            }
+        } else {
+            ""
+        }
+        .into();
         let msg = MqttMessage::new(topic.clone(), payload, true, 1);
 
         // Store topic we are going to publish

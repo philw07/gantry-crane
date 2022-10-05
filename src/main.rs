@@ -1,3 +1,4 @@
+mod args;
 mod constants;
 mod container;
 mod events;
@@ -8,14 +9,29 @@ mod settings;
 mod util;
 
 use anyhow::Result;
+use args::GantryCraneArgs;
+use constants::{APP_NAME, APP_VERSION};
 use gantry_crane::GantryCrane;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let args = GantryCraneArgs::from_env();
+
+    // Print version and exit if requested
+    if args.version {
+        println!("{} {}", APP_NAME, APP_VERSION);
+        std::process::exit(0);
+    }
+
     init_logging();
 
+    // Run app
     let app = GantryCrane::new()?;
-    app.run().await
+    if args.clean {
+        app.run_clean().await
+    } else {
+        app.run().await
+    }
 }
 
 fn init_logging() {

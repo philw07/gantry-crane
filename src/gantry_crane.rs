@@ -62,6 +62,50 @@ impl GantryCrane {
         }
     }
 
+    pub async fn run_clean(&self) -> Result<()> {
+        log::info!(
+            "{} {} - Cleaning up retained MQTT messages, this will take a few seconds",
+            APP_NAME,
+            APP_VERSION
+        );
+
+        // Connect to MQTT
+        self.mqtt.connect().await?;
+
+        let mut tasks = Vec::new();
+
+        // Setup signal handler
+        tasks.push(tokio::spawn(async {
+            if let Err(e) = Self::handle_signals().await {
+                log::error!("An error occurred trying to setup signal handlers: {}", e);
+            }
+        }));
+
+        // Run MQTT client event loop
+        let mqtt_fut = self.mqtt.event_loop();
+
+        // Setup home assistant integration
+        if self.settings.homeassistant.active {
+            let ha_settings = self.settings.homeassistant.clone();
+            let mut ha = HomeAssistantIntegration::new(ha_settings, &self.event_channel);
+            tasks.push(tokio::spawn(async move { ha.run().await }));
+        }
+
+        tokio::select! {
+            _ = select_all(tasks) => (),
+            _ = mqtt_fut => log::debug!("MQTT event loop ended"),
+            _ = self.handle_mqtt_messages() => log::debug!("handle_mqtt_messages() ended"),
+
+            // Run for a few seconds
+            _ = tokio::time::sleep(Duration::from_secs(5)) => (),
+        }
+
+        // Disconnect from MQTT
+        self.mqtt.disconnect(true).await;
+
+        Ok(())
+    }
+
     pub async fn run(&self) -> Result<()> {
         let mut result = Ok(());
         log::info!("Starting {} {}", APP_NAME, APP_VERSION);
@@ -119,7 +163,7 @@ impl GantryCrane {
         log::info!("Shutting down");
 
         // Disconnect from MQTT
-        self.mqtt.disconnect().await;
+        self.mqtt.disconnect(false).await;
         result
     }
 
