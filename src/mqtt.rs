@@ -52,6 +52,8 @@ impl From<MqttMessage> for mqtt::Message {
 
 pub struct MqttClient {
     client: Arc<mqtt::AsyncClient>,
+    username: Option<String>,
+    password: Option<String>,
     receiver: Arc<RwLock<mqtt::AsyncReceiver<Option<mqtt::Message>>>>,
     published: Arc<RwLock<HashSet<String>>>,
     event_tx: EventSender,
@@ -78,6 +80,8 @@ impl MqttClient {
 
         Ok(MqttClient {
             client: Arc::new(client),
+            username: settings.mqtt.username.clone(),
+            password: settings.mqtt.password.clone(),
             receiver,
             published: Arc::new(RwLock::new(HashSet::new())),
             event_tx: event_channel.get_sender(),
@@ -91,11 +95,15 @@ impl MqttClient {
             STATE_OFFLINE,
             mqtt::QOS_1,
         );
-        let options = mqtt::ConnectOptionsBuilder::new()
+        let mut options = mqtt::ConnectOptionsBuilder::new();
+        options
             .clean_session(false)
             .will_message(will)
-            .automatic_reconnect(Duration::from_secs(2), Duration::from_secs(30))
-            .finalize();
+            .automatic_reconnect(Duration::from_secs(2), Duration::from_secs(30));
+        if let (Some(user), Some(pass)) = (self.username.as_ref(), self.password.as_ref()) {
+            options.user_name(user).password(pass);
+        }
+        let options = options.finalize();
 
         // Try to connect to broker
         match self.client.connect(options).await {

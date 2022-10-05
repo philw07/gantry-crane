@@ -3,6 +3,8 @@ poll_interval = 60
 [mqtt]
 host = "localhost"
 port = 1883
+username = ""
+password = ""
 # client_id = "gantry-crane-1"
 
 [homeassistant]

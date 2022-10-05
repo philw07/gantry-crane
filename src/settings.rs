@@ -47,6 +47,8 @@ impl Settings {
 pub struct MqttSettings {
     pub host: String,
     pub port: u16,
+    pub username: Option<String>,
+    pub password: Option<String>,
     pub client_id: Option<String>,
 }
 
@@ -55,6 +57,8 @@ impl Default for MqttSettings {
         Self {
             host: "localhost".into(),
             port: 1883,
+            username: None,
+            password: None,
             client_id: None,
         }
     }
