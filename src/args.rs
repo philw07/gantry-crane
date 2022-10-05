@@ -7,6 +7,10 @@ pub struct GantryCraneArgs {
     #[argh(switch)]
     pub clean: bool,
 
+    /// provide the path to the config file
+    #[argh(option)]
+    pub config: Option<String>,
+
     /// display the version of the app
     #[argh(switch, short = 'v')]
     pub version: bool,

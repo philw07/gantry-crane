@@ -26,7 +26,7 @@ async fn main() -> Result<()> {
     init_logging();
 
     // Run app
-    let app = GantryCrane::new()?;
+    let app = GantryCrane::new(&args)?;
     if args.clean {
         app.run_clean().await
     } else {

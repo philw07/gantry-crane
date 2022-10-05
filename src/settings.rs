@@ -24,9 +24,9 @@ impl Default for Settings {
 }
 
 impl Settings {
-    pub fn new() -> Result<Self, impl std::error::Error> {
+    pub fn new(config: Option<&str>) -> Result<Self, impl std::error::Error> {
         Figment::from(Serialized::defaults(Settings::default()))
-            .merge(Toml::file(CONFIG_FILE))
+            .merge(Toml::file(config.unwrap_or(CONFIG_FILE)))
             .merge(Env::raw().map(|k| {
                 if k.starts_with("mqtt_") {
                     k.as_str().to_lowercase().replace("mqtt_", "mqtt.").into()

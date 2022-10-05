@@ -22,6 +22,7 @@ use tokio::{
 };
 
 use crate::{
+    args::GantryCraneArgs,
     constants::{
         APP_NAME, APP_VERSION, BASE_TOPIC, DOCKER_EVENT_ACTION_CREATE, DOCKER_EVENT_ACTION_DESTROY,
         DOCKER_EVENT_ACTION_PAUSE, DOCKER_EVENT_ACTION_RENAME, DOCKER_EVENT_ACTION_RESTART,
@@ -44,11 +45,11 @@ pub struct GantryCrane {
 }
 
 impl GantryCrane {
-    pub fn new() -> Result<Self> {
+    pub fn new(args: &GantryCraneArgs) -> Result<Self> {
         match Docker::connect_with_local_defaults() {
             Ok(docker) => {
                 let event_channel = EventChannel::new();
-                let settings = Settings::new()?;
+                let settings = Settings::new(args.config.as_deref())?;
                 let mqtt = MqttClient::new(&event_channel, &settings)?;
                 Ok(GantryCrane {
                     docker,
