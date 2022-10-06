@@ -186,16 +186,19 @@ impl MqttClient {
                             // Store topic we are going to publish
                             published_topics.write().await.insert(msg.topic.clone());
 
-                            // Publish message
+                            // Publish message in a separate task to avoid waiting
                             let topic = msg.topic.clone();
-                            match client.publish(msg.into()).await {
-                                Ok(()) => {
-                                    log::debug!("Published MQTT message for topic '{}'", topic);
+                            let fut_client = client.clone();
+                            tokio::spawn(async move {
+                                match fut_client.publish(msg.into()).await {
+                                    Ok(()) => {
+                                        log::debug!("Published MQTT message for topic '{}'", topic);
+                                    }
+                                    Err(e) => {
+                                        log::error!("Failed to publish MQTT message: {}", e);
+                                    }
                                 }
-                                Err(e) => {
-                                    log::error!("Failed to publish MQTT message: {}", e);
-                                }
-                            }
+                            });
                         }
                         Event::SubscribeMqttTopic(topic) => {
                             log::debug!("Subscribing to MQTT topic '{}'", topic);
