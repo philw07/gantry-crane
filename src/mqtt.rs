@@ -126,7 +126,7 @@ impl MqttClient {
 
         match self.client.disconnect(None).await {
             Ok(_) => {
-                log::info!("Disconnected from MQTT");
+                log::info!("Successfully disconnected from MQTT");
                 true
             }
             Err(e) => {
@@ -143,69 +143,79 @@ impl MqttClient {
     }
 
     pub async fn event_loop(&self) {
-        let client = self.client.clone();
+        // Task to receive incoming message
         let published_topics = self.published.clone();
         let event_tx = self.event_tx.clone();
-        let event_rx = self.event_rx.clone();
         let receiver = self.receiver.clone();
-
-        _ = tokio::spawn(async move {
+        let task_recv = tokio::spawn(async move {
             let mut receiver = receiver.write().await;
-            let mut event_rx = event_rx.write().await;
             loop {
-                tokio::select! {
-                    // Handle incoming MQTT messages
-                    res = receiver.next() => {
-                        if let Some(Some(msg)) = res {
+                match receiver.next().await {
+                    Some(msg_opt) => {
+                        if let Some(msg) = msg_opt {
                             if !published_topics.read().await.contains(msg.topic()) {
-                                if let Err(e) = event_tx.send(Event::MqttMessageReceived(msg.into())) {
+                                if let Err(e) =
+                                    event_tx.send(Event::MqttMessageReceived(msg.into()))
+                                {
                                     log::error!("Failed to send MQTT message event: {}", e);
                                 }
                             }
-                        } else if let Some(None) = res {
+                        } else {
                             // None means disconnected from MQTT
                             log::debug!("Disconnected from MQTT in event loop");
-                        } else {
-                            log::debug!("Received None from MQTT client receiver");
-                            break;
                         }
-                    },
-                    // Handle internal events
-                    res = event_rx.recv() => {
-                        match res {
-                            Ok(event) => {
-                                match event {
-                                    Event::PublishMqttMessage(msg) => {
-                                        // Store topic we are going to publish
-                                        published_topics.write().await.insert(msg.topic.clone());
-
-                                        // Publish message
-                                        let topic = msg.topic.clone();
-                                        match client.publish(msg.into()).await {
-                                            Ok(()) => {
-                                                log::debug!("Published MQTT message for topic '{}'", topic);
-                                            }
-                                            Err(e) => {
-                                                log::error!("Failed to publish MQTT message: {}", e);
-                                            }
-                                        }
-                                    }
-                                    Event::SubscribeMqttTopic(topic) => {
-                                        log::debug!("Subscribing to MQTT topic '{}'", topic);
-                                        client.subscribe(topic, 0);
-                                    }
-                                    _ => {}
-                                }
-                            },
-                            Err(e) => {
-                                log::error!("Error while reading events: {}", e);
-                                break;
-                            },
-                        }
-                    },
+                    }
+                    None => {
+                        log::debug!("Received None from MQTT client receiver");
+                        break;
+                    }
                 }
             }
-        }).await;
+        });
+
+        // Task to handle internal events
+        let published_topics = self.published.clone();
+        let event_rx = self.event_rx.clone();
+        let client = self.client.clone();
+        let task_send = tokio::spawn(async move {
+            let mut event_rx = event_rx.write().await;
+            loop {
+                match event_rx.recv().await {
+                    Ok(event) => match event {
+                        Event::PublishMqttMessage(msg) => {
+                            // Store topic we are going to publish
+                            published_topics.write().await.insert(msg.topic.clone());
+
+                            // Publish message
+                            let topic = msg.topic.clone();
+                            match client.publish(msg.into()).await {
+                                Ok(()) => {
+                                    log::debug!("Published MQTT message for topic '{}'", topic);
+                                }
+                                Err(e) => {
+                                    log::error!("Failed to publish MQTT message: {}", e);
+                                }
+                            }
+                        }
+                        Event::SubscribeMqttTopic(topic) => {
+                            log::debug!("Subscribing to MQTT topic '{}'", topic);
+                            client.subscribe(topic, 0);
+                        }
+                        _ => {}
+                    },
+                    Err(e) => {
+                        log::error!("Error while reading events: {}", e);
+                        break;
+                    }
+                }
+            }
+        });
+
+        // Wait for any task to end
+        tokio::select! {
+            _ = task_recv => (),
+            _ = task_send => (),
+        }
     }
 
     async fn publish_state(&self, state: Option<bool>) {
