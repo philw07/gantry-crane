@@ -13,6 +13,11 @@ use args::GantryCraneArgs;
 use constants::{APP_NAME, APP_VERSION};
 use gantry_crane::GantryCrane;
 
+#[cfg(debug_assertions)]
+const LOG_LEVEL_DEFAULT: &str = "gantry_crane=debug";
+#[cfg(not(debug_assertions))]
+const LOG_LEVEL_DEFAULT: &str = "gantry_crane=info";
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = GantryCraneArgs::from_env();
@@ -35,11 +40,6 @@ async fn main() -> Result<()> {
 }
 
 fn init_logging() {
-    let default_level = if cfg!(debug_assertions) {
-        "gantry_crane=debug"
-    } else {
-        "gantry_crane=info"
-    };
-    let env = env_logger::Env::default().filter_or("LOG_LEVEL", default_level);
+    let env = env_logger::Env::default().filter_or("LOG_LEVEL", LOG_LEVEL_DEFAULT);
     env_logger::init_from_env(env);
 }
