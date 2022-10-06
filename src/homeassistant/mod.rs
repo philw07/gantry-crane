@@ -40,53 +40,61 @@ impl HomeAssistantIntegration {
         }
 
         // Handle events
-        while let Ok(event) = self.event_rx.recv().await {
-            match event {
-                Event::ContainerCreated(container_info) => {
-                    let container = HomeAssistantContainer::new(
-                        self.event_tx.clone(),
-                        &container_info.name,
-                        self.settings.base_topic.clone(),
-                        self.settings.node_id.clone(),
-                    );
-                    container.publish();
-                    self.containers.insert(container_info.name, container);
-                }
-                Event::ContainerRemoved(container_info) => {
-                    if let Some(container) = self.containers.remove(&container_info.name) {
-                        container.unpublish();
-                    } else {
-                        log::warn!("Received container remove event for container '{}', but HA container doesn't exist", container_info.name);
+        loop {
+            match self.event_rx.recv().await {
+                Ok(event) => match event {
+                    Event::ContainerCreated(container_info) => {
+                        let container = HomeAssistantContainer::new(
+                            self.event_tx.clone(),
+                            &container_info.name,
+                            self.settings.base_topic.clone(),
+                            self.settings.node_id.clone(),
+                        );
+                        container.publish();
+                        self.containers.insert(container_info.name, container);
                     }
-                }
-                Event::MqttMessageReceived(mut msg) => {
-                    // Delete stale container entries
-                    let subtopics = msg.topic.split('/').collect::<Vec<_>>();
-                    if subtopics.len() == 5
-                        && subtopics[0] == self.settings.base_topic
-                        && subtopics[2] == self.settings.node_id
-                        && subtopics[3].contains("__")
-                        && subtopics[4] == "config"
-                    {
-                        if let Some(container_name) = subtopics[3].split("__").next() {
-                            if !self
-                                .containers
-                                .contains_key(&format!("/{}", container_name))
-                            {
-                                log::debug!(
-                                    "Unpublishing stale topic for HA container '{}'",
-                                    container_name
-                                );
-                                msg.payload = "".into();
-                                msg.qos = 1;
-                                if let Err(e) = self.event_tx.send(Event::PublishMqttMessage(msg)) {
-                                    log::error!("Failed to send event: {}", e);
+                    Event::ContainerRemoved(container_info) => {
+                        if let Some(container) = self.containers.remove(&container_info.name) {
+                            container.unpublish();
+                        } else {
+                            log::warn!("Received container remove event for container '{}', but HA container doesn't exist", container_info.name);
+                        }
+                    }
+                    Event::MqttMessageReceived(mut msg) => {
+                        // Delete stale container entries
+                        let subtopics = msg.topic.split('/').collect::<Vec<_>>();
+                        if subtopics.len() == 5
+                            && subtopics[0] == self.settings.base_topic
+                            && subtopics[2] == self.settings.node_id
+                            && subtopics[3].contains("__")
+                            && subtopics[4] == "config"
+                        {
+                            if let Some(container_name) = subtopics[3].split("__").next() {
+                                if !self
+                                    .containers
+                                    .contains_key(&format!("/{}", container_name))
+                                {
+                                    log::debug!(
+                                        "Unpublishing stale topic for HA container '{}'",
+                                        container_name
+                                    );
+                                    msg.payload = "".into();
+                                    msg.qos = 1;
+                                    if let Err(e) =
+                                        self.event_tx.send(Event::PublishMqttMessage(msg))
+                                    {
+                                        log::error!("Failed to send event: {}", e);
+                                    }
                                 }
                             }
                         }
                     }
+                    _ => {}
+                },
+                Err(e) => {
+                    log::error!("Error while reading from event channel: {}", e);
+                    break;
                 }
-                _ => {}
             }
         }
     }
