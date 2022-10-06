@@ -27,7 +27,7 @@ use crate::{
         APP_NAME, APP_VERSION, BASE_TOPIC, BUFFER_SIZE_POLL_CHANNEL, DOCKER_EVENT_ACTION_CREATE,
         DOCKER_EVENT_ACTION_DESTROY, DOCKER_EVENT_ACTION_PAUSE, DOCKER_EVENT_ACTION_RENAME,
         DOCKER_EVENT_ACTION_RESTART, DOCKER_EVENT_ACTION_START, DOCKER_EVENT_ACTION_STOP,
-        DOCKER_EVENT_ACTION_UNPAUSE, SET_STATE_TOPIC,
+        DOCKER_EVENT_ACTION_UNPAUSE, DOCKER_LABEL_FILTER, SET_STATE_TOPIC,
     },
     container::Container,
     events::{Event, EventChannel},
@@ -298,7 +298,9 @@ impl GantryCrane {
                 // Add containers
                 for (res, image) in all_info.into_iter().zip(images) {
                     if let (Some(stats), Some(inspect)) = res {
-                        self.create_container(stats, inspect, image).await;
+                        if self.is_container_enabled(&inspect) {
+                            self.create_container(stats, inspect, image).await;
+                        }
                     }
                 }
                 Ok(())
@@ -343,7 +345,9 @@ impl GantryCrane {
                                         self.get_container_stats_and_inspect(&container_name).await
                                     {
                                         let image = get_container_attr(&event.actor, "image");
-                                        self.create_container(stats, inspect, image).await;
+                                        if self.is_container_enabled(&inspect) {
+                                            self.create_container(stats, inspect, image).await;
+                                        }
                                     }
                                 }
                                 Some(DOCKER_EVENT_ACTION_DESTROY) => {
@@ -529,5 +533,22 @@ impl GantryCrane {
         };
 
         (stats, inspect)
+    }
+
+    fn is_container_enabled(&self, inspect: &ContainerInspectResponse) -> bool {
+        if self.settings.filter_by_label {
+            if let Some(config) = &inspect.config {
+                if let Some(labels) = &config.labels {
+                    if let Some(value) = labels.get(DOCKER_LABEL_FILTER) {
+                        println!("/// {}", value);
+                        return value == "true";
+                    }
+                }
+            }
+
+            false
+        } else {
+            true
+        }
     }
 }

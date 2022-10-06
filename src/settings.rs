@@ -9,6 +9,7 @@ const CONFIG_FILE: &str = "gantry-crane.toml";
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Settings {
     pub poll_interval: u32,
+    pub filter_by_label: bool,
     pub mqtt: MqttSettings,
     pub homeassistant: HomeAssistantSettings,
 }
@@ -17,6 +18,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             poll_interval: 60,
+            filter_by_label: false,
             mqtt: MqttSettings::default(),
             homeassistant: HomeAssistantSettings::default(),
         }

@@ -1,4 +1,5 @@
 poll_interval = 60
+filter_by_label = false
 
 [mqtt]
 host = "localhost"
