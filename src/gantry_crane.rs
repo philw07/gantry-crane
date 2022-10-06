@@ -24,10 +24,10 @@ use tokio::{
 use crate::{
     args::GantryCraneArgs,
     constants::{
-        APP_NAME, APP_VERSION, BASE_TOPIC, DOCKER_EVENT_ACTION_CREATE, DOCKER_EVENT_ACTION_DESTROY,
-        DOCKER_EVENT_ACTION_PAUSE, DOCKER_EVENT_ACTION_RENAME, DOCKER_EVENT_ACTION_RESTART,
-        DOCKER_EVENT_ACTION_START, DOCKER_EVENT_ACTION_STOP, DOCKER_EVENT_ACTION_UNPAUSE,
-        SET_STATE_TOPIC,
+        APP_NAME, APP_VERSION, BASE_TOPIC, BUFFER_SIZE_POLL_CHANNEL, DOCKER_EVENT_ACTION_CREATE,
+        DOCKER_EVENT_ACTION_DESTROY, DOCKER_EVENT_ACTION_PAUSE, DOCKER_EVENT_ACTION_RENAME,
+        DOCKER_EVENT_ACTION_RESTART, DOCKER_EVENT_ACTION_START, DOCKER_EVENT_ACTION_STOP,
+        DOCKER_EVENT_ACTION_UNPAUSE, SET_STATE_TOPIC,
     },
     container::Container,
     events::{Event, EventChannel},
@@ -149,7 +149,7 @@ impl GantryCrane {
                 }
 
                 // Run tasks until the first one finishes
-                let (tx, rx) = tokio::sync::mpsc::channel::<()>(5);
+                let (tx, rx) = tokio::sync::mpsc::channel::<()>(BUFFER_SIZE_POLL_CHANNEL);
                 tokio::select! {
                     _ = select_all(tasks) => (),
                     _ = mqtt_fut => log::debug!("MQTT event loop ended"),

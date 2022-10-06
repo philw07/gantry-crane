@@ -5,7 +5,10 @@ use paho_mqtt as mqtt;
 use tokio::sync::RwLock;
 
 use crate::{
-    constants::{APP_NAME, AVAILABILITY_TOPIC, BASE_TOPIC, STATE_OFFLINE, STATE_ONLINE},
+    constants::{
+        APP_NAME, AVAILABILITY_TOPIC, BASE_TOPIC, BUFFER_SIZE_MQTT_RECV, BUFFER_SIZE_MQTT_SEND,
+        STATE_OFFLINE, STATE_ONLINE,
+    },
     events::{Event, EventChannel, EventReceiver, EventSender},
     settings::Settings,
 };
@@ -74,9 +77,10 @@ impl MqttClient {
                     .unwrap_or(APP_NAME)
                     .to_owned(),
             )
+            .max_buffered_messages(BUFFER_SIZE_MQTT_SEND)
             .finalize();
         let mut client = mqtt::AsyncClient::new(options)?;
-        let receiver = Arc::new(RwLock::new(client.get_stream(20)));
+        let receiver = Arc::new(RwLock::new(client.get_stream(BUFFER_SIZE_MQTT_RECV)));
 
         Ok(MqttClient {
             client: Arc::new(client),

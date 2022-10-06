@@ -1,6 +1,6 @@
 use tokio::sync::broadcast::{self, Receiver, Sender};
 
-use crate::{container::Container, mqtt::MqttMessage};
+use crate::{constants::BUFFER_SIZE_EVENT_CHANNEL, container::Container, mqtt::MqttMessage};
 
 pub type EventSender = Sender<Event>;
 pub type EventReceiver = Receiver<Event>;
@@ -13,7 +13,7 @@ pub struct EventChannel {
 
 impl EventChannel {
     pub fn new() -> Self {
-        let (tx, rx) = broadcast::channel::<Event>(64);
+        let (tx, rx) = broadcast::channel::<Event>(BUFFER_SIZE_EVENT_CHANNEL);
         Self { rx, tx }
     }
 

@@ -18,3 +18,9 @@ pub const DOCKER_EVENT_ACTION_STOP: &str = "stop";
 pub const DOCKER_EVENT_ACTION_RESTART: &str = "restart";
 pub const DOCKER_EVENT_ACTION_PAUSE: &str = "pause";
 pub const DOCKER_EVENT_ACTION_UNPAUSE: &str = "unpause";
+
+// These numbers should be more than sufficient for the usual home setup
+pub const BUFFER_SIZE_EVENT_CHANNEL: usize = 1024;
+pub const BUFFER_SIZE_POLL_CHANNEL: usize = 8;
+pub const BUFFER_SIZE_MQTT_RECV: usize = 384;
+pub const BUFFER_SIZE_MQTT_SEND: i32 = 384;
