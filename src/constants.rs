@@ -1,5 +1,6 @@
 pub const APP_NAME: &str = env!("CARGO_PKG_NAME");
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const CONFIG_FILE: &str = "gantry-crane.toml";
 
 pub const PRECISION: u32 = 2;
 

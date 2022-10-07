@@ -4,9 +4,7 @@ use figment::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::constants::APP_NAME;
-
-const CONFIG_FILE: &str = "gantry-crane.toml";
+use crate::constants::{APP_NAME, CONFIG_FILE};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Settings {
