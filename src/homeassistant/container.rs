@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
 use crate::{
-    constants::{AVAILABILITY_TOPIC, BASE_TOPIC, SET_STATE_TOPIC},
+    constants::{AVAILABILITY_TOPIC, SET_STATE_TOPIC},
     events::{Event, EventSender},
     mqtt::MqttMessage,
+    settings::Settings,
 };
 
 use super::{
@@ -14,8 +15,8 @@ use super::{
 };
 
 pub struct HomeAssistantContainer {
+    settings: Arc<Settings>,
     event_tx: EventSender,
-    base_topic: String,
     node_id: String,
     device: Arc<Device>,
     sensors: Vec<Sensor>,
@@ -24,14 +25,14 @@ pub struct HomeAssistantContainer {
 
 impl HomeAssistantContainer {
     pub fn new(
+        settings: Arc<Settings>,
         event_tx: EventSender,
         container_name: &str,
-        base_topic: String,
         node_id: String,
     ) -> Self {
         HomeAssistantContainer {
+            settings,
             event_tx,
-            base_topic,
             node_id,
             device: Arc::new(Device::new(
                 container_name[1..].into(),
@@ -48,8 +49,11 @@ impl HomeAssistantContainer {
         // Image
         self.sensors.push(Sensor {
             name: "Image".into(),
-            state_topic: format!("{}/{}", BASE_TOPIC, self.device.name),
-            availability_topic: Some(format!("{}/{}", BASE_TOPIC, AVAILABILITY_TOPIC)),
+            state_topic: format!("{}/{}", self.settings.mqtt.base_topic, self.device.name),
+            availability_topic: Some(format!(
+                "{}/{}",
+                self.settings.mqtt.base_topic, AVAILABILITY_TOPIC
+            )),
             device: self.device.clone(),
             enabled_by_default: Some(true),
             entity_category: None,
@@ -68,8 +72,11 @@ impl HomeAssistantContainer {
         // State
         self.sensors.push(Sensor {
             name: "State".into(),
-            state_topic: format!("{}/{}", BASE_TOPIC, self.device.name),
-            availability_topic: Some(format!("{}/{}", BASE_TOPIC, AVAILABILITY_TOPIC)),
+            state_topic: format!("{}/{}", self.settings.mqtt.base_topic, self.device.name),
+            availability_topic: Some(format!(
+                "{}/{}",
+                self.settings.mqtt.base_topic, AVAILABILITY_TOPIC
+            )),
             device: self.device.clone(),
             enabled_by_default: Some(true),
             entity_category: None,
@@ -88,8 +95,11 @@ impl HomeAssistantContainer {
         // Health
         self.sensors.push(Sensor {
             name: "Health".into(),
-            state_topic: format!("{}/{}", BASE_TOPIC, self.device.name),
-            availability_topic: Some(format!("{}/{}", BASE_TOPIC, AVAILABILITY_TOPIC)),
+            state_topic: format!("{}/{}", self.settings.mqtt.base_topic, self.device.name),
+            availability_topic: Some(format!(
+                "{}/{}",
+                self.settings.mqtt.base_topic, AVAILABILITY_TOPIC
+            )),
             device: self.device.clone(),
             enabled_by_default: Some(false),
             entity_category: None,
@@ -108,8 +118,11 @@ impl HomeAssistantContainer {
         // CPU
         self.sensors.push(Sensor {
             name: "CPU Percentage".into(),
-            state_topic: format!("{}/{}", BASE_TOPIC, self.device.name),
-            availability_topic: Some(format!("{}/{}", BASE_TOPIC, AVAILABILITY_TOPIC)),
+            state_topic: format!("{}/{}", self.settings.mqtt.base_topic, self.device.name),
+            availability_topic: Some(format!(
+                "{}/{}",
+                self.settings.mqtt.base_topic, AVAILABILITY_TOPIC
+            )),
             device: self.device.clone(),
             enabled_by_default: Some(true),
             entity_category: None,
@@ -128,8 +141,11 @@ impl HomeAssistantContainer {
         // Memory percentage
         self.sensors.push(Sensor {
             name: "Memory Percentage".into(),
-            state_topic: format!("{}/{}", BASE_TOPIC, self.device.name),
-            availability_topic: Some(format!("{}/{}", BASE_TOPIC, AVAILABILITY_TOPIC)),
+            state_topic: format!("{}/{}", self.settings.mqtt.base_topic, self.device.name),
+            availability_topic: Some(format!(
+                "{}/{}",
+                self.settings.mqtt.base_topic, AVAILABILITY_TOPIC
+            )),
             device: self.device.clone(),
             enabled_by_default: Some(true),
             entity_category: None,
@@ -148,8 +164,11 @@ impl HomeAssistantContainer {
         // Memory absolute
         self.sensors.push(Sensor {
             name: "Memory Usage".into(),
-            state_topic: format!("{}/{}", BASE_TOPIC, self.device.name),
-            availability_topic: Some(format!("{}/{}", BASE_TOPIC, AVAILABILITY_TOPIC)),
+            state_topic: format!("{}/{}", self.settings.mqtt.base_topic, self.device.name),
+            availability_topic: Some(format!(
+                "{}/{}",
+                self.settings.mqtt.base_topic, AVAILABILITY_TOPIC
+            )),
             device: self.device.clone(),
             enabled_by_default: Some(false),
             entity_category: None,
@@ -168,8 +187,11 @@ impl HomeAssistantContainer {
         // Net RX
         self.sensors.push(Sensor {
             name: "Net RX".into(),
-            state_topic: format!("{}/{}", BASE_TOPIC, self.device.name),
-            availability_topic: Some(format!("{}/{}", BASE_TOPIC, AVAILABILITY_TOPIC)),
+            state_topic: format!("{}/{}", self.settings.mqtt.base_topic, self.device.name),
+            availability_topic: Some(format!(
+                "{}/{}",
+                self.settings.mqtt.base_topic, AVAILABILITY_TOPIC
+            )),
             device: self.device.clone(),
             enabled_by_default: Some(false),
             entity_category: None,
@@ -188,8 +210,11 @@ impl HomeAssistantContainer {
         // Net TX
         self.sensors.push(Sensor {
             name: "Net TX".into(),
-            state_topic: format!("{}/{}", BASE_TOPIC, self.device.name),
-            availability_topic: Some(format!("{}/{}", BASE_TOPIC, AVAILABILITY_TOPIC)),
+            state_topic: format!("{}/{}", self.settings.mqtt.base_topic, self.device.name),
+            availability_topic: Some(format!(
+                "{}/{}",
+                self.settings.mqtt.base_topic, AVAILABILITY_TOPIC
+            )),
             device: self.device.clone(),
             enabled_by_default: Some(false),
             entity_category: None,
@@ -208,8 +233,11 @@ impl HomeAssistantContainer {
         // Block RX
         self.sensors.push(Sensor {
             name: "Block RX".into(),
-            state_topic: format!("{}/{}", BASE_TOPIC, self.device.name),
-            availability_topic: Some(format!("{}/{}", BASE_TOPIC, AVAILABILITY_TOPIC)),
+            state_topic: format!("{}/{}", self.settings.mqtt.base_topic, self.device.name),
+            availability_topic: Some(format!(
+                "{}/{}",
+                self.settings.mqtt.base_topic, AVAILABILITY_TOPIC
+            )),
             device: self.device.clone(),
             enabled_by_default: Some(false),
             entity_category: None,
@@ -228,8 +256,11 @@ impl HomeAssistantContainer {
         // Block TX
         self.sensors.push(Sensor {
             name: "Block TX".into(),
-            state_topic: format!("{}/{}", BASE_TOPIC, self.device.name),
-            availability_topic: Some(format!("{}/{}", BASE_TOPIC, AVAILABILITY_TOPIC)),
+            state_topic: format!("{}/{}", self.settings.mqtt.base_topic, self.device.name),
+            availability_topic: Some(format!(
+                "{}/{}",
+                self.settings.mqtt.base_topic, AVAILABILITY_TOPIC
+            )),
             device: self.device.clone(),
             enabled_by_default: Some(false),
             entity_category: None,
@@ -252,8 +283,14 @@ impl HomeAssistantContainer {
         // Start
         self.buttons.push(Button {
             name: "Start".into(),
-            availability_topic: Some(format!("{}/{}", BASE_TOPIC, AVAILABILITY_TOPIC)),
-            command_topic: format!("{}/{}/{}", BASE_TOPIC, self.device.name, SET_STATE_TOPIC),
+            availability_topic: Some(format!(
+                "{}/{}",
+                self.settings.mqtt.base_topic, AVAILABILITY_TOPIC
+            )),
+            command_topic: format!(
+                "{}/{}/{}",
+                self.settings.mqtt.base_topic, self.device.name, SET_STATE_TOPIC
+            ),
             device: self.device.clone(),
             device_class: None,
             enabled_by_default: Some(true),
@@ -270,8 +307,11 @@ impl HomeAssistantContainer {
         // Stop
         self.buttons.push(Button {
             name: "Stop".into(),
-            availability_topic: Some(format!("{}/{}", BASE_TOPIC, AVAILABILITY_TOPIC)),
-            command_topic: format!("{}/{}/set", BASE_TOPIC, self.device.name),
+            availability_topic: Some(format!(
+                "{}/{}",
+                self.settings.mqtt.base_topic, AVAILABILITY_TOPIC
+            )),
+            command_topic: format!("{}/{}/set", self.settings.mqtt.base_topic, self.device.name),
             device: self.device.clone(),
             device_class: None,
             enabled_by_default: Some(true),
@@ -288,8 +328,11 @@ impl HomeAssistantContainer {
         // Restart
         self.buttons.push(Button {
             name: "Restart".into(),
-            availability_topic: Some(format!("{}/{}", BASE_TOPIC, AVAILABILITY_TOPIC)),
-            command_topic: format!("{}/{}/set", BASE_TOPIC, self.device.name),
+            availability_topic: Some(format!(
+                "{}/{}",
+                self.settings.mqtt.base_topic, AVAILABILITY_TOPIC
+            )),
+            command_topic: format!("{}/{}/set", self.settings.mqtt.base_topic, self.device.name),
             device: self.device.clone(),
             device_class: Some(DeviceClass::Restart),
             enabled_by_default: Some(true),
@@ -306,8 +349,11 @@ impl HomeAssistantContainer {
         // Pause
         self.buttons.push(Button {
             name: "Pause".into(),
-            availability_topic: Some(format!("{}/{}", BASE_TOPIC, AVAILABILITY_TOPIC)),
-            command_topic: format!("{}/{}/set", BASE_TOPIC, self.device.name),
+            availability_topic: Some(format!(
+                "{}/{}",
+                self.settings.mqtt.base_topic, AVAILABILITY_TOPIC
+            )),
+            command_topic: format!("{}/{}/set", self.settings.mqtt.base_topic, self.device.name),
             device: self.device.clone(),
             device_class: None,
             enabled_by_default: Some(false),
@@ -324,8 +370,11 @@ impl HomeAssistantContainer {
         // Unause
         self.buttons.push(Button {
             name: "Unpause".into(),
-            availability_topic: Some(format!("{}/{}", BASE_TOPIC, AVAILABILITY_TOPIC)),
-            command_topic: format!("{}/{}/set", BASE_TOPIC, self.device.name),
+            availability_topic: Some(format!(
+                "{}/{}",
+                self.settings.mqtt.base_topic, AVAILABILITY_TOPIC
+            )),
+            command_topic: format!("{}/{}/set", self.settings.mqtt.base_topic, self.device.name),
             device: self.device.clone(),
             device_class: None,
             enabled_by_default: Some(false),
@@ -357,7 +406,7 @@ impl HomeAssistantContainer {
                 if let Err(e) = self
                     .event_tx
                     .send(Event::PublishMqttMessage(MqttMessage::new(
-                        entity.topic(&self.base_topic, &self.node_id),
+                        entity.topic(&self.settings.homeassistant.base_topic, &self.node_id),
                         json,
                         true,
                         1,
@@ -383,7 +432,7 @@ impl HomeAssistantContainer {
         if let Err(e) = self
             .event_tx
             .send(Event::PublishMqttMessage(MqttMessage::new(
-                entity.topic(&self.base_topic, &self.node_id),
+                entity.topic(&self.settings.homeassistant.base_topic, &self.node_id),
                 "".into(),
                 true,
                 1,

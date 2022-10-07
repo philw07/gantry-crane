@@ -4,6 +4,8 @@ use figment::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::constants::APP_NAME;
+
 const CONFIG_FILE: &str = "gantry-crane.toml";
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -51,7 +53,8 @@ pub struct MqttSettings {
     pub port: u16,
     pub username: Option<String>,
     pub password: Option<String>,
-    pub client_id: Option<String>,
+    pub client_id: String,
+    pub base_topic: String,
 }
 
 impl Default for MqttSettings {
@@ -61,7 +64,8 @@ impl Default for MqttSettings {
             port: 1883,
             username: None,
             password: None,
-            client_id: None,
+            client_id: APP_NAME.into(),
+            base_topic: APP_NAME.into(),
         }
     }
 }

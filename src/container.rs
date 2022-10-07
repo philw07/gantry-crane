@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use serde::Serialize;
 
 use bollard::{
@@ -6,14 +8,17 @@ use bollard::{
 };
 
 use crate::{
-    constants::{BASE_TOPIC, PRECISION, UNKNOWN},
+    constants::{PRECISION, UNKNOWN},
     events::{Event, EventChannel, EventSender},
     mqtt::MqttMessage,
+    settings::Settings,
     util::round,
 };
 
 #[derive(Clone, Serialize)]
 pub struct Container {
+    #[serde(skip)]
+    settings: Arc<Settings>,
     #[serde(skip)]
     event_tx: EventSender,
 
@@ -35,6 +40,7 @@ pub struct Container {
 
 impl Container {
     pub fn new(
+        settings: Arc<Settings>,
         event_channel: &EventChannel,
         stats: Stats,
         inspect: ContainerInspectResponse,
@@ -49,6 +55,7 @@ impl Container {
         }
 
         let mut container = Container {
+            settings,
             event_tx: event_channel.get_sender(),
 
             name: stats.name.clone(),
@@ -121,7 +128,7 @@ impl Container {
     }
 
     fn get_topic(&self) -> String {
-        format!("{}/{}", BASE_TOPIC, &self.name[1..])
+        format!("{}/{}", self.settings.mqtt.base_topic, &self.name[1..])
     }
 
     fn parse_state(&mut self, inspect: &ContainerInspectResponse) {
@@ -245,7 +252,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::{collections::HashMap, sync::Arc};
 
     use bollard::{
         container::{
@@ -259,9 +266,10 @@ mod tests {
     };
 
     use crate::{
-        constants::{BASE_TOPIC, UNKNOWN},
+        constants::UNKNOWN,
         events::{Event, EventChannel},
         mqtt::MqttMessage,
+        settings::Settings,
     };
 
     use super::Container;
@@ -270,6 +278,7 @@ mod tests {
     fn test_new_container() {
         let name = "test_name";
         let image = "test-image";
+        let settings = Arc::new(Settings::default());
         let event_channel = EventChannel::new();
 
         let stats = get_stats(name);
@@ -278,7 +287,8 @@ mod tests {
             ..Default::default()
         };
 
-        let container = Container::new(&event_channel, stats, inspect, Some(image.into()));
+        let container =
+            Container::new(settings, &event_channel, stats, inspect, Some(image.into()));
 
         assert_eq!(container.name, name);
         assert_eq!(container.image, image);
@@ -287,6 +297,7 @@ mod tests {
     #[test]
     fn test_new_container_no_image() {
         let name = "other_name";
+        let settings = Arc::new(Settings::default());
         let event_channel = EventChannel::new();
 
         let stats = get_stats(name);
@@ -295,7 +306,7 @@ mod tests {
             ..Default::default()
         };
 
-        let container = Container::new(&event_channel, stats, inspect, None);
+        let container = Container::new(settings, &event_channel, stats, inspect, None);
 
         assert_eq!(container.name, name);
         assert_eq!(container.image, UNKNOWN.to_owned());
@@ -304,6 +315,7 @@ mod tests {
     #[test]
     fn test_rename() {
         let name = "original_name";
+        let settings = Arc::new(Settings::default());
         let event_channel = EventChannel::new();
 
         let stats = get_stats(name);
@@ -312,7 +324,7 @@ mod tests {
             ..Default::default()
         };
 
-        let mut container = Container::new(&event_channel, stats, inspect, None);
+        let mut container = Container::new(settings, &event_channel, stats, inspect, None);
         assert_eq!(container.name, name);
 
         let new_name = "renamed_name";
@@ -322,13 +334,20 @@ mod tests {
 
     #[test]
     fn test_update() {
+        let settings = Arc::new(Settings::default());
         let event_channel = EventChannel::new();
         let mut stats = get_stats("");
         let mut inspect = ContainerInspectResponse {
             ..Default::default()
         };
 
-        let mut container = Container::new(&event_channel, stats.clone(), inspect.clone(), None);
+        let mut container = Container::new(
+            settings,
+            &event_channel,
+            stats.clone(),
+            inspect.clone(),
+            None,
+        );
 
         // Update state and health
         let status = ContainerStateStatusEnum::DEAD;
@@ -406,12 +425,19 @@ mod tests {
 
     #[test]
     fn test_parse_state() {
+        let settings = Arc::new(Settings::default());
         let event_channel = EventChannel::new();
         let stats = get_stats("");
         let mut inspect = ContainerInspectResponse {
             ..Default::default()
         };
-        let mut container = Container::new(&event_channel, stats.clone(), inspect.clone(), None);
+        let mut container = Container::new(
+            settings,
+            &event_channel,
+            stats.clone(),
+            inspect.clone(),
+            None,
+        );
 
         assert_eq!(container.state, UNKNOWN);
 
@@ -450,12 +476,19 @@ mod tests {
 
     #[test]
     fn test_parse_health() {
+        let settings = Arc::new(Settings::default());
         let event_channel = EventChannel::new();
         let stats = get_stats("");
         let mut inspect = ContainerInspectResponse {
             ..Default::default()
         };
-        let mut container = Container::new(&event_channel, stats.clone(), inspect.clone(), None);
+        let mut container = Container::new(
+            settings,
+            &event_channel,
+            stats.clone(),
+            inspect.clone(),
+            None,
+        );
 
         assert_eq!(container.health, UNKNOWN);
 
@@ -504,12 +537,19 @@ mod tests {
 
     #[test]
     fn test_parse_cpu() {
+        let settings = Arc::new(Settings::default());
         let event_channel = EventChannel::new();
         let mut stats = get_stats("");
         let inspect = ContainerInspectResponse {
             ..Default::default()
         };
-        let mut container = Container::new(&event_channel, stats.clone(), inspect.clone(), None);
+        let mut container = Container::new(
+            settings,
+            &event_channel,
+            stats.clone(),
+            inspect.clone(),
+            None,
+        );
 
         stats.cpu_stats.cpu_usage.total_usage = 20;
         stats.cpu_stats.system_cpu_usage = Some(200);
@@ -541,12 +581,19 @@ mod tests {
 
     #[test]
     fn test_parse_mem() {
+        let settings = Arc::new(Settings::default());
         let event_channel = EventChannel::new();
         let mut stats = get_stats("");
         let inspect = ContainerInspectResponse {
             ..Default::default()
         };
-        let mut container = Container::new(&event_channel, stats.clone(), inspect.clone(), None);
+        let mut container = Container::new(
+            settings,
+            &event_channel,
+            stats.clone(),
+            inspect.clone(),
+            None,
+        );
 
         assert_eq!(container.mem_mb, 0.0);
         assert_eq!(container.mem_percentage, 0.0);
@@ -569,12 +616,19 @@ mod tests {
 
     #[test]
     fn test_parse_network() {
+        let settings = Arc::new(Settings::default());
         let event_channel = EventChannel::new();
         let mut stats = get_stats("");
         let inspect = ContainerInspectResponse {
             ..Default::default()
         };
-        let mut container = Container::new(&event_channel, stats.clone(), inspect.clone(), None);
+        let mut container = Container::new(
+            settings,
+            &event_channel,
+            stats.clone(),
+            inspect.clone(),
+            None,
+        );
 
         assert_eq!(container.net_rx_mb, 0.0);
         assert_eq!(container.net_tx_mb, 0.0);
@@ -609,12 +663,19 @@ mod tests {
 
     #[test]
     fn test_parse_block_io() {
+        let settings = Arc::new(Settings::default());
         let event_channel = EventChannel::new();
         let mut stats = get_stats("");
         let inspect = ContainerInspectResponse {
             ..Default::default()
         };
-        let mut container = Container::new(&event_channel, stats.clone(), inspect.clone(), None);
+        let mut container = Container::new(
+            settings,
+            &event_channel,
+            stats.clone(),
+            inspect.clone(),
+            None,
+        );
 
         assert_eq!(container.block_rx_mb, 0.0);
         assert_eq!(container.block_tx_mb, 0.0);
@@ -703,6 +764,7 @@ mod tests {
     fn test_get_topic() {
         let name = "/test_name";
         let image = "test-image";
+        let settings = Arc::new(Settings::default());
         let event_channel = EventChannel::new();
 
         let stats = get_stats(name);
@@ -711,12 +773,18 @@ mod tests {
             ..Default::default()
         };
 
-        let container = Container::new(&event_channel, stats, inspect, Some(image.into()));
+        let container = Container::new(
+            settings.clone(),
+            &event_channel,
+            stats,
+            inspect,
+            Some(image.into()),
+        );
         let topic = container.get_topic();
         assert_eq!(topic.matches('/').count(), 1);
         assert_eq!(
             topic.split('/').collect::<Vec<_>>(),
-            [BASE_TOPIC, &name[1..]]
+            [&settings.mqtt.base_topic, &name[1..]]
         );
     }
 
@@ -724,6 +792,7 @@ mod tests {
     async fn test_publish() {
         let name = "test_name";
         let image = "test-image";
+        let settings = Arc::new(Settings::default());
         let event_channel = EventChannel::new();
 
         let stats = get_stats(name);
@@ -732,7 +801,8 @@ mod tests {
             ..Default::default()
         };
 
-        let container = Container::new(&event_channel, stats, inspect, Some(image.into()));
+        let container =
+            Container::new(settings, &event_channel, stats, inspect, Some(image.into()));
 
         let mut recv = event_channel.get_receiver();
         container.publish().await;
@@ -753,6 +823,7 @@ mod tests {
     async fn test_unpublish() {
         let name = "test_name";
         let image = "test-image";
+        let settings = Arc::new(Settings::default());
         let event_channel = EventChannel::new();
 
         let stats = get_stats(name);
@@ -761,7 +832,8 @@ mod tests {
             ..Default::default()
         };
 
-        let container = Container::new(&event_channel, stats, inspect, Some(image.into()));
+        let container =
+            Container::new(settings, &event_channel, stats, inspect, Some(image.into()));
 
         let mut recv = event_channel.get_receiver();
         container.unpublish().await;

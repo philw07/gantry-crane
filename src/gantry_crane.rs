@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, collections::HashMap, time::Duration};
+use std::{borrow::Borrow, collections::HashMap, sync::Arc, time::Duration};
 
 use anyhow::Result;
 use bollard::{
@@ -24,7 +24,7 @@ use tokio::{
 use crate::{
     args::GantryCraneArgs,
     constants::{
-        APP_NAME, APP_VERSION, BASE_TOPIC, BUFFER_SIZE_POLL_CHANNEL, DOCKER_EVENT_ACTION_CREATE,
+        APP_NAME, APP_VERSION, BUFFER_SIZE_POLL_CHANNEL, DOCKER_EVENT_ACTION_CREATE,
         DOCKER_EVENT_ACTION_DESTROY, DOCKER_EVENT_ACTION_PAUSE, DOCKER_EVENT_ACTION_RENAME,
         DOCKER_EVENT_ACTION_RESTART, DOCKER_EVENT_ACTION_START, DOCKER_EVENT_ACTION_STOP,
         DOCKER_EVENT_ACTION_UNPAUSE, DOCKER_LABEL_FILTER, SET_STATE_TOPIC,
@@ -38,7 +38,7 @@ use crate::{
 
 pub struct GantryCrane {
     docker: Docker,
-    settings: Settings,
+    settings: Arc<Settings>,
     mqtt: MqttClient,
     event_channel: EventChannel,
     containers: RwLock<HashMap<String, Container>>,
@@ -49,8 +49,8 @@ impl GantryCrane {
         match Docker::connect_with_local_defaults() {
             Ok(docker) => {
                 let event_channel = EventChannel::new();
-                let settings = Settings::new(args.config.as_deref())?;
-                let mqtt = MqttClient::new(&event_channel, &settings)?;
+                let settings = Arc::new(Settings::new(args.config.as_deref())?);
+                let mqtt = MqttClient::new(&event_channel, settings.clone())?;
                 Ok(GantryCrane {
                     docker,
                     settings,
@@ -87,8 +87,7 @@ impl GantryCrane {
 
         // Setup home assistant integration
         if self.settings.homeassistant.active {
-            let ha_settings = self.settings.homeassistant.clone();
-            let mut ha = HomeAssistantIntegration::new(ha_settings, &self.event_channel);
+            let mut ha = HomeAssistantIntegration::new(self.settings.clone(), &self.event_channel);
             tasks.push(tokio::spawn(async move { ha.run().await }));
         }
 
@@ -131,8 +130,8 @@ impl GantryCrane {
 
                 // Setup home assistant integration
                 if self.settings.homeassistant.active {
-                    let ha_settings = self.settings.homeassistant.clone();
-                    let mut ha = HomeAssistantIntegration::new(ha_settings, &self.event_channel);
+                    let mut ha =
+                        HomeAssistantIntegration::new(self.settings.clone(), &self.event_channel);
                     tasks.push(tokio::spawn(async move { ha.run().await }));
                 }
 
@@ -181,14 +180,17 @@ impl GantryCrane {
 
     async fn handle_mqtt_messages(&self) {
         let mut receiver = self.event_channel.get_receiver();
-        self.mqtt.subscribe(&format!("{}/#", BASE_TOPIC)).await;
+        self.mqtt
+            .subscribe(&format!("{}/#", self.settings.mqtt.base_topic))
+            .await;
 
         while let Ok(event) = receiver.recv().await {
             if let Event::MqttMessageReceived(msg) = event {
                 let subtopics: Vec<_> = msg.topic.split('/').collect();
 
                 // Ignore messages with another base topic or if no subtopics are given
-                if !subtopics[0].starts_with(BASE_TOPIC) || subtopics.len() < 2 {
+                if !subtopics[0].starts_with(&self.settings.mqtt.base_topic) || subtopics.len() < 2
+                {
                     continue;
                 }
 
@@ -203,7 +205,8 @@ impl GantryCrane {
                     }
 
                     log::debug!("Unpublishing stale container '{}'", container_name);
-                    let topic = format!("{}/{}", BASE_TOPIC, &container_name[1..]);
+                    let topic =
+                        format!("{}/{}", self.settings.mqtt.base_topic, &container_name[1..]);
                     let msg = MqttMessage::new(topic, "".into(), true, 1);
                     self.event_channel.send(Event::PublishMqttMessage(msg));
                 }
@@ -443,7 +446,13 @@ impl GantryCrane {
         inspect: ContainerInspectResponse,
         image: Option<String>,
     ) {
-        let container = Container::new(&self.event_channel, stats, inspect, image);
+        let container = Container::new(
+            self.settings.clone(),
+            &self.event_channel,
+            stats,
+            inspect,
+            image,
+        );
         container.publish().await;
         self.add_container(container).await;
     }

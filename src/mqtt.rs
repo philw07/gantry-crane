@@ -6,8 +6,8 @@ use tokio::sync::RwLock;
 
 use crate::{
     constants::{
-        APP_NAME, AVAILABILITY_TOPIC, BASE_TOPIC, BUFFER_SIZE_MQTT_RECV, BUFFER_SIZE_MQTT_SEND,
-        STATE_OFFLINE, STATE_ONLINE,
+        AVAILABILITY_TOPIC, BUFFER_SIZE_MQTT_RECV, BUFFER_SIZE_MQTT_SEND, STATE_OFFLINE,
+        STATE_ONLINE,
     },
     events::{Event, EventChannel, EventReceiver, EventSender},
     settings::Settings,
@@ -54,6 +54,7 @@ impl From<MqttMessage> for mqtt::Message {
 }
 
 pub struct MqttClient {
+    settings: Arc<Settings>,
     client: Arc<mqtt::AsyncClient>,
     username: Option<String>,
     password: Option<String>,
@@ -64,19 +65,12 @@ pub struct MqttClient {
 }
 
 impl MqttClient {
-    pub fn new(event_channel: &EventChannel, settings: &Settings) -> Result<Self, mqtt::Error> {
+    pub fn new(event_channel: &EventChannel, settings: Arc<Settings>) -> Result<Self, mqtt::Error> {
         let uri = format!("tcp://{}:{}", settings.mqtt.host, settings.mqtt.port);
         let options = mqtt::CreateOptionsBuilder::new()
             .mqtt_version(mqtt::MQTT_VERSION_3_1_1)
             .server_uri(uri)
-            .client_id(
-                settings
-                    .mqtt
-                    .client_id
-                    .as_deref()
-                    .unwrap_or(APP_NAME)
-                    .to_owned(),
-            )
+            .client_id(&settings.mqtt.client_id)
             .max_buffered_messages(BUFFER_SIZE_MQTT_SEND)
             .finalize();
         let mut client = mqtt::AsyncClient::new(options)?;
@@ -90,12 +84,13 @@ impl MqttClient {
             published: Arc::new(RwLock::new(HashSet::new())),
             event_tx: event_channel.get_sender(),
             event_rx: Arc::new(RwLock::new(event_channel.get_receiver())),
+            settings,
         })
     }
 
     pub async fn connect(&self) -> Result<(), mqtt::Error> {
         let will = mqtt::Message::new_retained(
-            format!("{}/{}", BASE_TOPIC, AVAILABILITY_TOPIC),
+            format!("{}/{}", self.settings.mqtt.base_topic, AVAILABILITY_TOPIC),
             STATE_OFFLINE,
             mqtt::QOS_1,
         );
@@ -227,7 +222,7 @@ impl MqttClient {
 
     async fn publish_state(&self, state: Option<bool>) {
         // Construct message
-        let topic = format!("{}/{}", BASE_TOPIC, AVAILABILITY_TOPIC);
+        let topic = format!("{}/{}", self.settings.mqtt.base_topic, AVAILABILITY_TOPIC);
         let payload = if let Some(value) = state {
             if value {
                 STATE_ONLINE
