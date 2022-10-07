@@ -80,7 +80,7 @@ impl Default for HomeAssistantSettings {
         Self {
             active: false,
             base_topic: "homeassistant".into(),
-            node_id: "gantry-crane".into(),
+            node_id: APP_NAME.into(),
         }
     }
 }
