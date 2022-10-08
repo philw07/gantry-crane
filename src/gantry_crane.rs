@@ -354,11 +354,7 @@ impl GantryCrane {
                                     }
                                 }
                                 Some(DOCKER_EVENT_ACTION_DESTROY) => {
-                                    if let Some(_container) =
-                                        self.remove_container(&container_name).await
-                                    {
-                                        log::info!("Removed container '{}'", container_name);
-                                    } else {
+                                    if self.remove_container(&container_name).await.is_none() {
                                         log::debug!(
                                             "Received destroy event for unknown container '{}'",
                                             container_name
@@ -474,12 +470,13 @@ impl GantryCrane {
     }
 
     async fn remove_container(&self, name: &str) -> Option<Container> {
-        log::info!("Removing container '{}'", name);
+        log::debug!("Removing container '{}'", name);
         let container_opt = { self.containers.write().await.remove(name) };
         if let Some(container) = container_opt.borrow() {
             container.unpublish().await;
             self.event_channel
                 .send(Event::ContainerRemoved(container.into()));
+            log::info!("Removed container '{}'", name);
         }
 
         container_opt
