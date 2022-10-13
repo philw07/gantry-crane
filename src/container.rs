@@ -161,15 +161,24 @@ impl Container {
     fn parse_cpu(&mut self, stats: &Stats) {
         let mut cpu = 0.0;
         if let Some(sys_usage) = stats.cpu_stats.system_cpu_usage {
-            if let Some(percpu_usage) = stats.cpu_stats.cpu_usage.percpu_usage.as_ref() {
-                let cpu_delta = stats.cpu_stats.cpu_usage.total_usage as f64
-                    - stats.precpu_stats.cpu_usage.total_usage as f64;
-                let system_delta =
-                    sys_usage as f64 - stats.precpu_stats.system_cpu_usage.unwrap_or(0) as f64;
-
-                if cpu_delta > 0.0 && system_delta > 0.0 {
-                    cpu = (cpu_delta / system_delta) * 100.0 * percpu_usage.len() as f64;
+            let mut num_cpus = if let Some(num) = stats.cpu_stats.online_cpus {
+                num
+            } else {
+                0
+            };
+            if num_cpus == 0 {
+                if let Some(percpu_usage) = stats.cpu_stats.cpu_usage.percpu_usage.as_ref() {
+                    num_cpus = percpu_usage.len() as u64;
                 }
+            }
+
+            let cpu_delta = stats.cpu_stats.cpu_usage.total_usage as f64
+                - stats.precpu_stats.cpu_usage.total_usage as f64;
+            let system_delta =
+                sys_usage as f64 - stats.precpu_stats.system_cpu_usage.unwrap_or(0) as f64;
+
+            if cpu_delta > 0.0 && system_delta > 0.0 {
+                cpu = (cpu_delta / system_delta) * 100.0 * num_cpus as f64;
             }
         }
 
@@ -562,7 +571,19 @@ mod tests {
         container.parse_cpu(&stats);
         assert_eq!(container.cpu_percentage, 20.0);
 
-        stats.cpu_stats.cpu_usage.percpu_usage = Some(vec![0; 4]);
+        stats.cpu_stats.cpu_usage.percpu_usage = Some(vec![0; 3]);
+        container.parse_cpu(&stats);
+        assert_eq!(container.cpu_percentage, 30.0);
+
+        stats.cpu_stats.online_cpus = Some(0);
+        container.parse_cpu(&stats);
+        assert_eq!(container.cpu_percentage, 30.0);
+
+        stats.cpu_stats.online_cpus = Some(4);
+        container.parse_cpu(&stats);
+        assert_eq!(container.cpu_percentage, 40.0);
+
+        stats.cpu_stats.cpu_usage.percpu_usage = None;
         container.parse_cpu(&stats);
         assert_eq!(container.cpu_percentage, 40.0);
 

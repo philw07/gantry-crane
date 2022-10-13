@@ -502,7 +502,7 @@ impl GantryCrane {
         // Try to get stats and inspect
         let options = StatsOptions {
             stream: false,
-            one_shot: true,
+            one_shot: false,
         };
         let mut stats_stream = self.docker.stats(container_name, Some(options));
         let inspect_fut = self.docker.inspect_container(container_name, None);
