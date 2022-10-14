@@ -191,13 +191,17 @@ impl Container {
         if let Some(usage) = stats.memory_stats.usage {
             mem = usage as f64;
             // Subtract cache if available (same as docker CLI)
-            if let Some(MemoryStatsStats::V1(stats_v1)) = stats.memory_stats.stats {
-                mem -= stats_v1.total_inactive_file as f64;
+            match stats.memory_stats.stats {
+                Some(MemoryStatsStats::V1(stats_v1)) => mem -= stats_v1.total_inactive_file as f64,
+                Some(MemoryStatsStats::V2(stats_v2)) => mem -= stats_v2.inactive_file as f64,
+                _ => (),
             }
 
             // Calculate percentage
             if let Some(limit) = stats.memory_stats.limit {
-                percentage = mem / limit as f64 * 100.0;
+                if limit != 0 {
+                    percentage = mem / limit as f64 * 100.0;
+                }
             }
 
             // Convert to MiB
@@ -266,7 +270,8 @@ mod tests {
     use bollard::{
         container::{
             BlkioStats, BlkioStatsEntry, CPUStats, CPUUsage, MemoryStats, MemoryStatsStats,
-            MemoryStatsStatsV1, NetworkStats, PidsStats, Stats, StorageStats, ThrottlingData,
+            MemoryStatsStatsV1, MemoryStatsStatsV2, NetworkStats, PidsStats, Stats, StorageStats,
+            ThrottlingData,
         },
         service::{
             ContainerInspectResponse, ContainerState, ContainerStateStatusEnum, Health,
@@ -633,6 +638,11 @@ mod tests {
         container.parse_mem(&stats);
         assert_eq!(container.mem_mb, 90.0);
         assert_eq!(container.mem_percentage, 9.0);
+
+        stats.memory_stats.stats = Some(MemoryStatsStats::V2(get_memory_stats_v2(5 * 1_048_576)));
+        container.parse_mem(&stats);
+        assert_eq!(container.mem_mb, 95.0);
+        assert_eq!(container.mem_percentage, 9.5);
     }
 
     #[test]
@@ -963,6 +973,42 @@ mod tests {
             total_writeback: 0,
             unevictable: 0,
             writeback: 0,
+        }
+    }
+
+    fn get_memory_stats_v2(inactive_file: u64) -> MemoryStatsStatsV2 {
+        MemoryStatsStatsV2 {
+            anon: 0,
+            file: 0,
+            kernel_stack: 0,
+            slab: 0,
+            sock: 0,
+            shmem: 0,
+            file_mapped: 0,
+            file_dirty: 0,
+            file_writeback: 0,
+            anon_thp: 0,
+            inactive_anon: 0,
+            active_anon: 0,
+            inactive_file,
+            active_file: 0,
+            unevictable: 0,
+            slab_reclaimable: 0,
+            slab_unreclaimable: 0,
+            pgfault: 0,
+            pgmajfault: 0,
+            workingset_refault: 0,
+            workingset_activate: 0,
+            workingset_nodereclaim: 0,
+            pgrefill: 0,
+            pgscan: 0,
+            pgsteal: 0,
+            pgactivate: 0,
+            pgdeactivate: 0,
+            pglazyfree: 0,
+            pglazyfreed: 0,
+            thp_fault_alloc: 0,
+            thp_collapse_alloc: 0,
         }
     }
 
