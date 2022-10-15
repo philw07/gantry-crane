@@ -51,7 +51,7 @@ impl HomeAssistantIntegration {
                         let container = HomeAssistantContainer::new(
                             self.settings.clone(),
                             self.event_tx.clone(),
-                            &container_info.name,
+                            &container_info,
                             self.settings.homeassistant.node_id.clone(),
                         );
                         container.publish();

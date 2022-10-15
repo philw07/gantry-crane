@@ -44,12 +44,14 @@ pub enum Event {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContainerEventInfo {
     pub name: String,
+    pub is_host_networking: bool,
 }
 
 impl From<&Container> for ContainerEventInfo {
     fn from(c: &Container) -> Self {
         Self {
             name: c.get_name().into(),
+            is_host_networking: c.is_host_networking,
         }
     }
 }
@@ -58,6 +60,7 @@ impl From<Container> for ContainerEventInfo {
     fn from(c: Container) -> Self {
         Self {
             name: c.get_name().into(),
+            is_host_networking: c.is_host_networking,
         }
     }
 }

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::{
     constants::{AVAILABILITY_TOPIC, SET_STATE_TOPIC},
-    events::{Event, EventSender},
+    events::{ContainerEventInfo, Event, EventSender},
     mqtt::MqttMessage,
     settings::Settings,
 };
@@ -18,6 +18,7 @@ pub struct HomeAssistantContainer {
     settings: Arc<Settings>,
     event_tx: EventSender,
     node_id: String,
+    is_host_networking: bool,
     device: Arc<Device>,
     sensors: Vec<Sensor>,
     buttons: Vec<Button>,
@@ -27,15 +28,16 @@ impl HomeAssistantContainer {
     pub fn new(
         settings: Arc<Settings>,
         event_tx: EventSender,
-        container_name: &str,
+        container: &ContainerEventInfo,
         node_id: String,
     ) -> Self {
         HomeAssistantContainer {
             settings,
             event_tx,
             node_id,
+            is_host_networking: container.is_host_networking,
             device: Arc::new(Device::new(
-                container_name[1..].into(),
+                container.name[1..].into(),
                 Some("Docker".into()),
             )),
             sensors: Vec::new(),
@@ -184,51 +186,54 @@ impl HomeAssistantContainer {
             value_template: Some("{{ value_json['mem_mb'] }}".into()),
         });
 
-        // Net RX
-        self.sensors.push(Sensor {
-            name: "Net RX".into(),
-            state_topic: format!("{}/{}", self.settings.mqtt.base_topic, self.device.name),
-            availability_topic: Some(format!(
-                "{}/{}",
-                self.settings.mqtt.base_topic, AVAILABILITY_TOPIC
-            )),
-            device: self.device.clone(),
-            enabled_by_default: Some(false),
-            entity_category: None,
-            expire_after: None,
-            force_update: None,
-            icon: Some("mdi:download-network-outline".into()),
-            object_id: Some(format!("{}_net_rx", self.device.name)),
-            payload_available: None,
-            payload_not_available: None,
-            state_class: Some(StateClass::Measurement),
-            unique_id: Some(format!("gc_{}_net_rx", self.device.name)),
-            unit_of_measurement: Some("MB".into()),
-            value_template: Some("{{ value_json['net_rx_mb'] }}".into()),
-        });
+        // Network stats are not available in case of host network mode
+        if !self.is_host_networking {
+            // Net RX
+            self.sensors.push(Sensor {
+                name: "Net RX".into(),
+                state_topic: format!("{}/{}", self.settings.mqtt.base_topic, self.device.name),
+                availability_topic: Some(format!(
+                    "{}/{}",
+                    self.settings.mqtt.base_topic, AVAILABILITY_TOPIC
+                )),
+                device: self.device.clone(),
+                enabled_by_default: Some(false),
+                entity_category: None,
+                expire_after: None,
+                force_update: None,
+                icon: Some("mdi:download-network-outline".into()),
+                object_id: Some(format!("{}_net_rx", self.device.name)),
+                payload_available: None,
+                payload_not_available: None,
+                state_class: Some(StateClass::Measurement),
+                unique_id: Some(format!("gc_{}_net_rx", self.device.name)),
+                unit_of_measurement: Some("MB".into()),
+                value_template: Some("{{ value_json['net_rx_mb'] }}".into()),
+            });
 
-        // Net TX
-        self.sensors.push(Sensor {
-            name: "Net TX".into(),
-            state_topic: format!("{}/{}", self.settings.mqtt.base_topic, self.device.name),
-            availability_topic: Some(format!(
-                "{}/{}",
-                self.settings.mqtt.base_topic, AVAILABILITY_TOPIC
-            )),
-            device: self.device.clone(),
-            enabled_by_default: Some(false),
-            entity_category: None,
-            expire_after: None,
-            force_update: None,
-            icon: Some("mdi:upload-network-outline".into()),
-            object_id: Some(format!("{}_net_tx", self.device.name)),
-            payload_available: None,
-            payload_not_available: None,
-            state_class: Some(StateClass::Measurement),
-            unique_id: Some(format!("gc_{}_net_tx", self.device.name)),
-            unit_of_measurement: Some("MB".into()),
-            value_template: Some("{{ value_json['net_tx_mb'] }}".into()),
-        });
+            // Net TX
+            self.sensors.push(Sensor {
+                name: "Net TX".into(),
+                state_topic: format!("{}/{}", self.settings.mqtt.base_topic, self.device.name),
+                availability_topic: Some(format!(
+                    "{}/{}",
+                    self.settings.mqtt.base_topic, AVAILABILITY_TOPIC
+                )),
+                device: self.device.clone(),
+                enabled_by_default: Some(false),
+                entity_category: None,
+                expire_after: None,
+                force_update: None,
+                icon: Some("mdi:upload-network-outline".into()),
+                object_id: Some(format!("{}_net_tx", self.device.name)),
+                payload_available: None,
+                payload_not_available: None,
+                state_class: Some(StateClass::Measurement),
+                unique_id: Some(format!("gc_{}_net_tx", self.device.name)),
+                unit_of_measurement: Some("MB".into()),
+                value_template: Some("{{ value_json['net_tx_mb'] }}".into()),
+            });
+        }
 
         // Block RX
         self.sensors.push(Sensor {

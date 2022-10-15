@@ -8,7 +8,7 @@ use bollard::{
 };
 
 use crate::{
-    constants::{PRECISION, UNKNOWN},
+    constants::{DOCKER_NETWORK_MODE_HOST, PRECISION, UNKNOWN},
     events::{Event, EventChannel, EventSender},
     mqtt::MqttMessage,
     settings::Settings,
@@ -21,6 +21,9 @@ pub struct Container {
     settings: Arc<Settings>,
     #[serde(skip)]
     event_tx: EventSender,
+
+    #[serde(skip)]
+    pub is_host_networking: bool,
 
     #[serde(serialize_with = "serialize_name")]
     name: String,
@@ -57,6 +60,8 @@ impl Container {
         let mut container = Container {
             settings,
             event_tx: event_channel.get_sender(),
+
+            is_host_networking: Self::is_host_networking(&inspect).unwrap_or(false),
 
             name: stats.name.clone(),
             image: image.unwrap_or_else(|| UNKNOWN.into()),
@@ -253,6 +258,17 @@ impl Container {
 
         self.block_rx_mb = round(rx, PRECISION);
         self.block_tx_mb = round(tx, PRECISION);
+    }
+
+    fn is_host_networking(inspect: &ContainerInspectResponse) -> Option<bool> {
+        Some(
+            inspect
+                .host_config
+                .as_ref()?
+                .network_mode
+                .as_ref()?
+                .eq(DOCKER_NETWORK_MODE_HOST),
+        )
     }
 }
 

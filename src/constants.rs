@@ -20,6 +20,7 @@ pub const DOCKER_EVENT_ACTION_STOP: &str = "stop";
 pub const DOCKER_EVENT_ACTION_RESTART: &str = "restart";
 pub const DOCKER_EVENT_ACTION_PAUSE: &str = "pause";
 pub const DOCKER_EVENT_ACTION_UNPAUSE: &str = "unpause";
+pub const DOCKER_NETWORK_MODE_HOST: &str = "host";
 
 // These numbers should be more than sufficient for the usual home setup
 pub const BUFFER_SIZE_EVENT_CHANNEL: usize = 1024;
