@@ -118,7 +118,7 @@ impl MqttClient {
         }
     }
 
-    pub async fn disconnect(&self, clean: bool) -> bool {
+    pub async fn disconnect(&self, clean: bool) {
         // Remove or publish availability topic
         // Since the intent is to disconnect, we'll timeout after a short moment
         let state = if clean { None } else { Some(false) };
@@ -134,11 +134,9 @@ impl MqttClient {
         match self.client.disconnect(None).await {
             Ok(_) => {
                 log::info!("Successfully disconnected from MQTT");
-                true
             }
             Err(e) => {
                 log::error!("Failed to disconnect from MQTT: {}", e);
-                false
             }
         }
     }
