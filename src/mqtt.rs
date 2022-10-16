@@ -104,13 +104,24 @@ impl MqttClient {
         }
         let options = options.finalize();
 
+        // Store availabiliy topic in published topics
+        let availabiliy_topic = self.get_availability_topic();
+        self.published
+            .write()
+            .await
+            .insert(availabiliy_topic.clone());
+
+        // Set connected callback to publish availability. This will make sure the
+        // availabiliy is set to online even after losing the connection temporarily
+        self.client.set_connected_callback(move |client| {
+            log::info!("Connected to MQTT server");
+            let msg = mqtt::Message::new_retained(&availabiliy_topic, STATE_ONLINE, 0);
+            client.publish(msg);
+        });
+
         // Try to connect to broker
         match self.client.connect(options).await {
-            Ok(_) => {
-                log::info!("Connected to MQTT server");
-                self.publish_state(Some(true)).await;
-                Ok(())
-            }
+            Ok(_) => Ok(()),
             Err(e) => {
                 log::error!("Failed to connect to MQTT server: {}", e);
                 Err(e)
@@ -226,9 +237,13 @@ impl MqttClient {
         }
     }
 
+    fn get_availability_topic(&self) -> String {
+        format!("{}/{}", self.settings.mqtt.base_topic, AVAILABILITY_TOPIC)
+    }
+
     async fn publish_state(&self, state: Option<bool>) {
         // Construct message
-        let topic = format!("{}/{}", self.settings.mqtt.base_topic, AVAILABILITY_TOPIC);
+        let topic = self.get_availability_topic();
         let payload = if let Some(value) = state {
             if value {
                 STATE_ONLINE
@@ -237,15 +252,11 @@ impl MqttClient {
             }
         } else {
             ""
-        }
-        .into();
-        let msg = MqttMessage::new(topic.clone(), payload, true, 1);
-
-        // Store topic we are going to publish
-        self.published.write().await.insert(topic.clone());
+        };
+        let msg = mqtt::Message::new_retained(&topic, payload, 1);
 
         // Publish message
-        match self.client.publish(msg.into()).await {
+        match self.client.publish(msg).await {
             Ok(()) => {
                 log::debug!("Published MQTT message for topic '{}'", topic);
             }
