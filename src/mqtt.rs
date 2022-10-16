@@ -120,8 +120,16 @@ impl MqttClient {
 
     pub async fn disconnect(&self, clean: bool) -> bool {
         // Remove or publish availability topic
+        // Since the intent is to disconnect, we'll timeout after a short moment
         let state = if clean { None } else { Some(false) };
-        self.publish_state(state).await;
+        tokio::select! {
+            _ = self.publish_state(state) => (),
+            _ = tokio::time::sleep(Duration::from_secs(2)) => {
+                log::debug!("Failed to publish state while disconnecting");
+                // Don't disconnect, so the last will message kicks in
+                return;
+            },
+        }
 
         match self.client.disconnect(None).await {
             Ok(_) => {
