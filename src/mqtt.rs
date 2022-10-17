@@ -60,6 +60,7 @@ pub struct MqttClient {
     password: Option<String>,
     receiver: Arc<RwLock<mqtt::AsyncReceiver<Option<mqtt::Message>>>>,
     published: Arc<RwLock<HashSet<String>>>,
+    subscribed: Arc<RwLock<Vec<String>>>,
     event_tx: EventSender,
     event_rx: Arc<RwLock<EventReceiver>>,
 }
@@ -82,6 +83,7 @@ impl MqttClient {
             password: settings.mqtt.password.clone(),
             receiver,
             published: Arc::new(RwLock::new(HashSet::new())),
+            subscribed: Arc::new(RwLock::new(Vec::new())),
             event_tx: event_channel.get_sender(),
             event_rx: Arc::new(RwLock::new(event_channel.get_receiver())),
             settings,
@@ -113,8 +115,12 @@ impl MqttClient {
 
         // Set connected callback to publish availability. This will make sure the
         // availabiliy is set to online even after losing the connection temporarily
+        let event_tx = self.event_tx.clone();
         self.client.set_connected_callback(move |client| {
             log::info!("Connected to MQTT server");
+            _ = event_tx.send(Event::MqttConnected);
+
+            // Publish state
             let msg = mqtt::Message::new_retained(&availabiliy_topic, STATE_ONLINE, 0);
             client.publish(msg);
         });
@@ -185,6 +191,7 @@ impl MqttClient {
 
         // Task to handle internal events
         let published_topics = self.published.clone();
+        let subscribed_topics = self.subscribed.clone();
         let event_rx = self.event_rx.clone();
         let client = self.client.clone();
         let task_send = tokio::spawn(async move {
@@ -212,7 +219,19 @@ impl MqttClient {
                         }
                         Event::SubscribeMqttTopic(topic) => {
                             log::debug!("Subscribing to MQTT topic '{}'", topic);
-                            client.subscribe(topic, 0);
+                            if let Err(e) = client.subscribe(&topic, mqtt::QOS_0).await {
+                                log::error!("Failed to subscribe to topic '{}': {}", topic, e);
+                            } else {
+                                subscribed_topics.write().await.push(topic);
+                            }
+                        }
+                        Event::MqttConnected => {
+                            let topics = subscribed_topics.read().await;
+                            if topics.len() > 0 {
+                                log::debug!("Resubscribing to {} topics", topics.len());
+                                let qos = vec![0; topics.len()];
+                                client.subscribe_many(&topics, &qos);
+                            }
                         }
                         _ => {}
                     },

@@ -39,6 +39,7 @@ pub enum Event {
     MqttMessageReceived(MqttMessage),
     PublishMqttMessage(MqttMessage),
     SubscribeMqttTopic(String),
+    MqttConnected,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
