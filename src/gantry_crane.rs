@@ -185,89 +185,126 @@ impl GantryCrane {
             self.settings.mqtt.base_topic
         )));
 
-        while let Ok(event) = receiver.recv().await {
-            if let Event::MqttMessageReceived(msg) = event {
-                let subtopics: Vec<_> = msg.topic.split('/').collect();
+        loop {
+            match receiver.recv().await {
+                Ok(Event::MqttMessageReceived(msg)) => {
+                    let subtopics: Vec<_> = msg.topic.split('/').collect();
 
-                // Ignore messages with another base topic or if no subtopics are given
-                if !subtopics[0].starts_with(&self.settings.mqtt.base_topic) || subtopics.len() < 2
-                {
-                    continue;
-                }
-
-                log::debug!("Received MQTT message for topic '{}'", msg.topic);
-                let container_name = format!("/{}", subtopics[1]);
-
-                // Remove potential stale containers
-                if msg.retained && subtopics.len() == 2 {
-                    // Ignore message if container exists
-                    if self.containers.read().await.contains_key(&container_name) {
+                    // Ignore messages with another base topic or if no subtopics are given
+                    if !subtopics[0].starts_with(&self.settings.mqtt.base_topic)
+                        || subtopics.len() < 2
+                    {
                         continue;
                     }
 
-                    log::debug!("Unpublishing stale container '{}'", container_name);
-                    let topic =
-                        format!("{}/{}", self.settings.mqtt.base_topic, &container_name[1..]);
-                    let msg = MqttMessage::new(topic, "".into(), true, 1);
-                    self.event_channel.send(Event::PublishMqttMessage(msg));
-                }
-                // Handle container requests
-                else if !msg.retained && subtopics.len() == 3 && subtopics[2] == SET_STATE_TOPIC {
-                    // Ignore if container doesn't exist
-                    if !self.containers.read().await.contains_key(&container_name) {
-                        continue;
-                    }
+                    log::debug!("Received MQTT message for topic '{}'", msg.topic);
+                    let container_name = format!("/{}", subtopics[1]);
 
-                    match msg.payload.as_str() {
-                        DOCKER_EVENT_ACTION_START => {
-                            log::info!("Trying to {} container '{}'", msg.payload, container_name);
-                            if let Err(e) = self
-                                .docker
-                                .start_container::<String>(&container_name[1..], None)
-                                .await
-                            {
-                                log::error!("Failed to {} container: {}", msg.payload, e);
-                            };
+                    // Remove potential stale containers
+                    if msg.retained && subtopics.len() == 2 {
+                        // Ignore message if container exists
+                        if self.containers.read().await.contains_key(&container_name) {
+                            continue;
                         }
-                        DOCKER_EVENT_ACTION_STOP => {
-                            log::info!("Trying to {} container '{}'", msg.payload, container_name);
-                            if let Err(e) =
-                                self.docker.stop_container(&container_name[1..], None).await
-                            {
-                                log::error!("Failed to {} container: {}", msg.payload, e);
-                            };
+
+                        log::debug!("Unpublishing stale container '{}'", container_name);
+                        let topic =
+                            format!("{}/{}", self.settings.mqtt.base_topic, &container_name[1..]);
+                        let msg = MqttMessage::new(topic, "".into(), true, 1);
+                        self.event_channel.send(Event::PublishMqttMessage(msg));
+                    }
+                    // Handle container requests
+                    else if !msg.retained
+                        && subtopics.len() == 3
+                        && subtopics[2] == SET_STATE_TOPIC
+                    {
+                        // Ignore if container doesn't exist
+                        if !self.containers.read().await.contains_key(&container_name) {
+                            log::debug!(
+                                "Received container request for unknown container '{}'",
+                                container_name
+                            );
+                            continue;
                         }
-                        DOCKER_EVENT_ACTION_RESTART => {
-                            log::info!("Trying to {} container '{}'", msg.payload, container_name);
-                            if let Err(e) = self
-                                .docker
-                                .restart_container(&container_name[1..], None)
-                                .await
-                            {
-                                log::error!("Failed to {} container: {}", msg.payload, e);
-                            };
+
+                        match msg.payload.as_str() {
+                            DOCKER_EVENT_ACTION_START => {
+                                log::info!(
+                                    "Trying to {} container '{}'",
+                                    msg.payload,
+                                    container_name
+                                );
+                                if let Err(e) = self
+                                    .docker
+                                    .start_container::<String>(&container_name[1..], None)
+                                    .await
+                                {
+                                    log::error!("Failed to {} container: {}", msg.payload, e);
+                                };
+                            }
+                            DOCKER_EVENT_ACTION_STOP => {
+                                log::info!(
+                                    "Trying to {} container '{}'",
+                                    msg.payload,
+                                    container_name
+                                );
+                                if let Err(e) =
+                                    self.docker.stop_container(&container_name[1..], None).await
+                                {
+                                    log::error!("Failed to {} container: {}", msg.payload, e);
+                                };
+                            }
+                            DOCKER_EVENT_ACTION_RESTART => {
+                                log::info!(
+                                    "Trying to {} container '{}'",
+                                    msg.payload,
+                                    container_name
+                                );
+                                if let Err(e) = self
+                                    .docker
+                                    .restart_container(&container_name[1..], None)
+                                    .await
+                                {
+                                    log::error!("Failed to {} container: {}", msg.payload, e);
+                                };
+                            }
+                            DOCKER_EVENT_ACTION_PAUSE => {
+                                log::info!(
+                                    "Trying to {} container '{}'",
+                                    msg.payload,
+                                    container_name
+                                );
+                                if let Err(e) =
+                                    self.docker.pause_container(&container_name[1..]).await
+                                {
+                                    log::error!("Failed to {} container: {}", msg.payload, e);
+                                };
+                            }
+                            DOCKER_EVENT_ACTION_UNPAUSE => {
+                                log::info!(
+                                    "Trying to {} container '{}'",
+                                    msg.payload,
+                                    container_name
+                                );
+                                if let Err(e) =
+                                    self.docker.unpause_container(&container_name[1..]).await
+                                {
+                                    log::error!("Failed to {} container: {}", msg.payload, e);
+                                };
+                            }
+                            _ => log::warn!(
+                                "Received unknown payload in set state message: {}",
+                                msg.payload
+                            ),
                         }
-                        DOCKER_EVENT_ACTION_PAUSE => {
-                            log::info!("Trying to {} container '{}'", msg.payload, container_name);
-                            if let Err(e) = self.docker.pause_container(&container_name[1..]).await
-                            {
-                                log::error!("Failed to {} container: {}", msg.payload, e);
-                            };
-                        }
-                        DOCKER_EVENT_ACTION_UNPAUSE => {
-                            log::info!("Trying to {} container '{}'", msg.payload, container_name);
-                            if let Err(e) =
-                                self.docker.unpause_container(&container_name[1..]).await
-                            {
-                                log::error!("Failed to {} container: {}", msg.payload, e);
-                            };
-                        }
-                        _ => log::warn!(
-                            "Received unknown payload in set state message: {}",
-                            msg.payload
-                        ),
                     }
                 }
+                Err(e) => {
+                    log::error!("Error while handling MQTT messages: {}", e);
+                    break;
+                }
+                // Ignore other events
+                _ => (),
             }
         }
     }
