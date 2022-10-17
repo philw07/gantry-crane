@@ -191,9 +191,7 @@ impl GantryCrane {
                     let subtopics: Vec<_> = msg.topic.split('/').collect();
 
                     // Ignore messages with another base topic or if no subtopics are given
-                    if !subtopics[0].starts_with(&self.settings.mqtt.base_topic)
-                        || subtopics.len() < 2
-                    {
+                    if subtopics[0] != self.settings.mqtt.base_topic || subtopics.len() < 2 {
                         continue;
                     }
 
