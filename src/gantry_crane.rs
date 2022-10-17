@@ -180,9 +180,10 @@ impl GantryCrane {
 
     async fn handle_mqtt_messages(&self) {
         let mut receiver = self.event_channel.get_receiver();
-        self.mqtt
-            .subscribe(&format!("{}/#", self.settings.mqtt.base_topic))
-            .await;
+        self.event_channel.send(Event::SubscribeMqttTopic(format!(
+            "{}/#",
+            self.settings.mqtt.base_topic
+        )));
 
         while let Ok(event) = receiver.recv().await {
             if let Event::MqttMessageReceived(msg) = event {

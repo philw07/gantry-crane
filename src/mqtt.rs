@@ -152,12 +152,6 @@ impl MqttClient {
         }
     }
 
-    pub async fn subscribe(&self, topic: &str) {
-        if let Err(e) = self.client.subscribe(topic, mqtt::QOS_0).await {
-            log::error!("Failed to subscribe to topic '{}': {}", topic, e);
-        }
-    }
-
     pub async fn event_loop(&self) {
         // Task to receive incoming message
         let published_topics = self.published.clone();
