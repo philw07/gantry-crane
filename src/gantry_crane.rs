@@ -1,4 +1,9 @@
-use std::{borrow::Borrow, collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    borrow::Borrow,
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use anyhow::Result;
 use bollard::{
@@ -91,13 +96,41 @@ impl GantryCrane {
             tasks.push(tokio::spawn(async move { ha.run().await }));
         }
 
+        let unpublish_topics = async move {
+            self.event_channel.send(Event::SubscribeMqttTopic(format!(
+                "{}/#",
+                self.settings.mqtt.base_topic
+            )));
+
+            let mut event_rx = self.event_channel.get_receiver();
+            let topic_prefix = format!("{}/", self.settings.mqtt.base_topic);
+            let mut last_message = Instant::now();
+            loop {
+                tokio::select! {
+                    event = event_rx.recv() => {
+                        if let Ok(Event::MqttMessageReceived(msg)) = event {
+                            last_message = Instant::now();
+                            if msg.retained && msg.topic.starts_with(&topic_prefix)
+                            {
+                                let msg = MqttMessage::new(msg.topic, "".into(), true, 1);
+                                self.event_channel.send(Event::PublishMqttMessage(msg));
+                            }
+                        }
+                    }
+                    _ = tokio::time::sleep(Duration::from_secs(1)) => (),
+                }
+
+                // If no message has been received for a while, we consider the job done
+                if last_message.elapsed() > Duration::from_secs(2) {
+                    break;
+                }
+            }
+        };
+
         tokio::select! {
             _ = select_all(tasks) => (),
             _ = mqtt_fut => log::debug!("MQTT event loop ended"),
-            _ = self.handle_mqtt_messages() => log::debug!("handle_mqtt_messages() ended"),
-
-            // Run for a few seconds
-            _ = tokio::time::sleep(Duration::from_secs(5)) => (),
+            _ = unpublish_topics => log::info!("All topics have been unpublished"),
         }
 
         // Disconnect from MQTT
