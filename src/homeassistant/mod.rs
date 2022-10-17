@@ -1,7 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
 use crate::{
-    constants::APP_NAME,
     events::{Event, EventChannel, EventReceiver, EventSender},
     settings::Settings,
 };
@@ -37,7 +36,7 @@ impl HomeAssistantIntegration {
         // Subscribe to Home Assistant discovery topic
         let topic = format!(
             "{}/+/{}/+/config",
-            self.settings.homeassistant.base_topic, APP_NAME
+            self.settings.homeassistant.base_topic, self.settings.homeassistant.node_id
         );
         if let Err(e) = self.event_tx.send(Event::SubscribeMqttTopic(topic)) {
             log::error!("Failed to subscribe to HA MQTT topic: {}", e);
