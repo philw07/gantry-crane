@@ -22,7 +22,6 @@ jobs:
       with:
         command: build
         args: --verbose
-    - name: Run tests
     
   test:
     runs-on: ubuntu-latest
