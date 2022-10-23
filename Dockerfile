@@ -1,6 +1,6 @@
-FROM rust as builder
+FROM rust:1 as builder
 
-RUN apt-get update && apt-get install -y --no-install-recommends cmake
+RUN apt-get update && apt-get install -y --no-install-recommends cmake=3.18.4-2+deb11u1
 
 WORKDIR /build
 COPY . /build
