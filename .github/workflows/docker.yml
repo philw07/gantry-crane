@@ -38,7 +38,10 @@ jobs:
         with:
           push: true
           context: .
-          platforms: linux/amd64
+          platforms: >-
+            linux/amd64,
+            linux/arm/v7,
+            linux/arm64
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
           cache-to: type=gha,mode=max
