@@ -615,7 +615,6 @@ impl GantryCrane {
             if let Some(config) = &inspect.config {
                 if let Some(labels) = &config.labels {
                     if let Some(value) = labels.get(DOCKER_LABEL_FILTER) {
-                        println!("/// {}", value);
                         return value == "true";
                     }
                 }
