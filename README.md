@@ -72,4 +72,4 @@ Some entities are disabled by default and can be enabled via the Home Assistant 
 
 The sensors and buttons can be used in automations or scenes, e.g. to start/stop containers at a specific time.
 
-![Home Assistant integration example](images/homeassistant_integration_example.png)
+![Home Assistant integration example](docs/images/homeassistant_integration_example.png)
