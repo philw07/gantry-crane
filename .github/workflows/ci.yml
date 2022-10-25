@@ -5,7 +5,8 @@ on:
     branches:
       - master
   pull_request:
-    branches: [ "master" ]
+    branches:
+      - "master"
 
 env:
   CARGO_TERM_COLOR: always
@@ -22,7 +23,7 @@ jobs:
         with:
           command: build
           args: --verbose
-    
+
   test:
     name: Run Tests
     runs-on: ubuntu-latest

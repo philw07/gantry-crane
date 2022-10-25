@@ -6,6 +6,12 @@ on:
       - master
     tags:
       - "*"
+    paths:
+      - ".cargo/**"
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "Dockerfile"
 
 env:
   CARGO_TERM_COLOR: always
@@ -39,7 +45,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push images 
+      - name: Build and push images
         uses: docker/build-push-action@v3
         with:
           push: true
