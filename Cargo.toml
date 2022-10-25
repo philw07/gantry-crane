@@ -2,7 +2,7 @@
 name = "gantry-crane"
 version = "0.1.0"
 edition = "2021"
-description = "A Docker to MQTT brigde to integrate your containers with your home automation system. Comes with a Home Assistant integration built-in."
+description = "A Docker to MQTT bridge to integrate your containers with your home automation system. Comes with a Home Assistant integration built-in."
 authors = ["philw07 <phil.w07@gmail.com>"]
 license = "MIT"
 readme = "README.md"

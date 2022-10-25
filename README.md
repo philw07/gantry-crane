@@ -5,7 +5,7 @@
 [![Dependency status](https://deps.rs/repo/github/philw07/gantry-crane/status.svg?style=flat-square)](https://deps.rs/repo/github/philw07/gantry-crane)
 [![License](https://img.shields.io/github/license/philw07/gantry-crane?style=flat-square)](https://github.com/philw07/gantry-crane/blob/master/LICENSE)
 
-A Docker to MQTT brigde which publishes information about your containers for other software to consume and allows to control them.  
+A Docker to MQTT bridge which publishes information about your containers for other software to consume and allows to control them.  
 Comes with a built-in [Home Assistant](https://www.home-assistant.io/) integration to monitor and control your containers right within Home Assistant.
 
 ## Getting started
@@ -53,7 +53,7 @@ in which case the location of the file should be passed as argument `--config pa
 | `MQTT_BASE_TOPIC` | gantry-crane | Base topic under which all information is published. Should only be changed if two instances connect to the same broker. |
 | `HOMEASSISTANT_ACTIVE` | false | Set to true to enable the Home Assistant integration. |
 | `HOMEASSISTANT_BASE_TOPIC` | homeassistant | Must match the [discovery prefix set in Home Assistant](https://www.home-assistant.io/docs/mqtt/discovery/#discovery_prefix). |
-| `HOMEASSISTANT_NODE_ID` | gantry-crane | The [node id](https://www.home-assistant.io/docs/mqtt/discovery/#discovery-topic) used for Home Assitant MQTT discovery. Should only be changed if two instances connect to the same broker. |
+| `HOMEASSISTANT_NODE_ID` | gantry-crane | The [node id](https://www.home-assistant.io/docs/mqtt/discovery/#discovery-topic) used for Home Assistant MQTT discovery. Should only be changed if two instances connect to the same broker. |
 
 ## Select containers to monitor
 
@@ -67,7 +67,7 @@ This can be done via [docker](https://docs.docker.com/engine/reference/commandli
 
 ## Home Assistant integration
 
-When enabling the Home Assistant integration, by setting `HOMEASSISTANT_ACTIVE` to true, gantry-crane will publish MQTT discovery topics which Home Assitant will pick up automatcially and add each container as a device with several entities (sensors and buttons).
+When enabling the Home Assistant integration, by setting `HOMEASSISTANT_ACTIVE` to true, gantry-crane will publish MQTT discovery topics which Home Assistant will pick up automatically and add each container as a device with several entities (sensors and buttons).
 Some entities are disabled by default and can be enabled via the Home Assistant UI.
 
 The sensors and buttons can be used in automations or scenes, e.g. to start/stop containers at a specific time.
