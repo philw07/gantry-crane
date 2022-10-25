@@ -1,6 +1,7 @@
 name: Docker
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - master
@@ -58,3 +59,8 @@ jobs:
           labels: ${{ steps.metadata.outputs.labels }}
           cache-to: type=gha,mode=max
           cache-from: type=gha
+      - name: Update README on docker hub
+        uses: peter-evans/dockerhub-description@v3
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}

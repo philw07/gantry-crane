@@ -38,7 +38,7 @@ services:
 ## Configuration
 
 The recommended way it to use environment variables for configuration.
-Alternatively, a `gantry-crane.toml` file can be used (refer to [gantry-crane.example.toml](gantry-crane.example.toml)),
+Alternatively, a `gantry-crane.toml` file can be used (refer to [gantry-crane.example.toml](https://github.com/philw07/gantry-crane/blob/master/gantry-crane.example.toml)),
 in which case the location of the file should be passed as argument `--config path/to/gantry-crane.toml`.
 
 | Environment variable | Default value | Description |
@@ -57,8 +57,6 @@ in which case the location of the file should be passed as argument `--config pa
 
 ## Select containers to monitor
 
-<!-- TODO: describe usage of labels to filter containers -->
-
 By default, gantry-crane bridges all containers to MQTT.
 This might not be desirable, especially if you have a large amount of containers.
 
@@ -72,4 +70,4 @@ Some entities are disabled by default and can be enabled via the Home Assistant 
 
 The sensors and buttons can be used in automations or scenes, e.g. to start/stop containers at a specific time.
 
-![Home Assistant integration example](docs/images/homeassistant_integration_example.png)
+![Home Assistant integration example](https://github.com/philw07/gantry-crane/raw/master/docs/images/homeassistant_integration_example.png)
