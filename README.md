@@ -28,7 +28,7 @@ version: "3.5"
 
 services:
   gantry-crane:
-    image: philw07/gantry-crane:edge
+    image: philw07/gantry-crane:latest # or ghcr.io/philw07/gantry-crane:latest
     container_name: gantry-crane
     restart: always
     volumes:
