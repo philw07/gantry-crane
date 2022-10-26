@@ -9,6 +9,7 @@ readme = "README.md"
 homepage = "https://github.com/philw07/gantry-crane"
 repository = "https://github.com/philw07/gantry-crane"
 keywords = ["docker", "mqtt", "bridge", "home assistant"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 anyhow = "1.0.66"

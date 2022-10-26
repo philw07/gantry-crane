@@ -45,23 +45,23 @@ impl Container {
     pub fn new(
         settings: Arc<Settings>,
         event_channel: &EventChannel,
-        stats: Stats,
-        inspect: ContainerInspectResponse,
+        stats: &Stats,
+        inspect: &ContainerInspectResponse,
         image: Option<String>,
     ) -> Self {
-        if inspect.name.is_some() && inspect.name.as_ref().unwrap() != &stats.name {
+        if inspect.name.as_ref() != Some(&stats.name) {
             log::warn!(
                 "Creating container with stats name '{}' and inspect name '{}'",
                 stats.name,
-                inspect.name.as_ref().unwrap()
+                inspect.name.as_deref().unwrap_or("<None>")
             );
         }
 
-        let mut container = Container {
+        let mut container = Self {
             settings,
             event_tx: event_channel.get_sender(),
 
-            is_host_networking: Self::is_host_networking(&inspect).unwrap_or(false),
+            is_host_networking: Self::is_host_networking(inspect).unwrap_or(false),
 
             name: stats.name.clone(),
             image: image.unwrap_or_else(|| UNKNOWN.into()),
@@ -89,26 +89,23 @@ impl Container {
         self.name = new_name;
     }
 
-    pub fn update(&mut self, stats: Stats, inspect: ContainerInspectResponse) {
-        if self.name != stats.name
-            || inspect.name.is_some() && inspect.name.as_ref().unwrap() != &stats.name
-        {
+    pub fn update(&mut self, stats: &Stats, inspect: &ContainerInspectResponse) {
+        if self.name != stats.name || inspect.name.as_ref() != Some(&stats.name) {
             log::warn!(
                 "Container '{}' received stats update for '{}' and inspect for '{}'",
                 self.name,
                 stats.name,
                 inspect.name.as_deref().unwrap_or("<None>")
-            )
-        } else {
-            log::info!("Updating Container '{}'", self.name);
-
-            self.parse_state(&inspect);
-            self.parse_health(&inspect);
-            self.parse_cpu(&stats);
-            self.parse_mem(&stats);
-            self.parse_network(&stats);
-            self.parse_block_io(&stats);
+            );
         }
+
+        log::info!("Updating Container '{}'", self.name);
+        self.parse_state(inspect);
+        self.parse_health(inspect);
+        self.parse_cpu(stats);
+        self.parse_mem(stats);
+        self.parse_network(stats);
+        self.parse_block_io(stats);
     }
 
     pub async fn publish(&self) {
@@ -120,7 +117,7 @@ impl Container {
                 }
             }
             Err(e) => {
-                log::error!("Failed to serialize container '{}': {}", self.name, e)
+                log::error!("Failed to serialize container '{}': {}", self.name, e);
             }
         };
     }
@@ -137,40 +134,32 @@ impl Container {
     }
 
     fn parse_state(&mut self, inspect: &ContainerInspectResponse) {
-        self.state = if let Some(ref state) = inspect.state {
-            match state.status {
-                Some(ContainerStateStatusEnum::EMPTY) => UNKNOWN.into(),
+        self.state = inspect.state.as_ref().map_or_else(
+            || UNKNOWN.into(),
+            |state| match state.status {
+                Some(ContainerStateStatusEnum::EMPTY) | None => UNKNOWN.into(),
                 Some(status) => status.as_ref().into(),
-                None => UNKNOWN.into(),
-            }
-        } else {
-            UNKNOWN.into()
-        }
+            },
+        );
     }
 
     fn parse_health(&mut self, inspect: &ContainerInspectResponse) {
-        self.health = if let Some(ref state) = inspect.state {
-            match state.health {
+        self.health = inspect.state.as_ref().map_or_else(
+            || UNKNOWN.into(),
+            |state| match state.health {
                 Some(ref health) => match health.status {
-                    Some(HealthStatusEnum::EMPTY) => UNKNOWN.into(),
+                    Some(HealthStatusEnum::EMPTY) | None => UNKNOWN.into(),
                     Some(status) => status.as_ref().into(),
-                    None => UNKNOWN.into(),
                 },
                 None => UNKNOWN.into(),
-            }
-        } else {
-            UNKNOWN.into()
-        }
+            },
+        );
     }
 
     fn parse_cpu(&mut self, stats: &Stats) {
         let mut cpu = 0.0;
         if let Some(sys_usage) = stats.cpu_stats.system_cpu_usage {
-            let mut num_cpus = if let Some(num) = stats.cpu_stats.online_cpus {
-                num
-            } else {
-                0
-            };
+            let mut num_cpus = stats.cpu_stats.online_cpus.map_or(0, |num| num);
             if num_cpus == 0 {
                 if let Some(percpu_usage) = stats.cpu_stats.cpu_usage.percpu_usage.as_ref() {
                     num_cpus = percpu_usage.len() as u64;
@@ -187,7 +176,7 @@ impl Container {
             }
         }
 
-        self.cpu_percentage = round(cpu, PRECISION)
+        self.cpu_percentage = round(cpu, PRECISION);
     }
 
     fn parse_mem(&mut self, stats: &Stats) {
@@ -317,8 +306,13 @@ mod tests {
             ..Default::default()
         };
 
-        let container =
-            Container::new(settings, &event_channel, stats, inspect, Some(image.into()));
+        let container = Container::new(
+            settings,
+            &event_channel,
+            &stats,
+            &inspect,
+            Some(image.into()),
+        );
 
         assert_eq!(container.name, name);
         assert_eq!(container.image, image);
@@ -336,7 +330,7 @@ mod tests {
             ..Default::default()
         };
 
-        let container = Container::new(settings, &event_channel, stats, inspect, None);
+        let container = Container::new(settings, &event_channel, &stats, &inspect, None);
 
         assert_eq!(container.name, name);
         assert_eq!(container.image, UNKNOWN.to_owned());
@@ -354,7 +348,7 @@ mod tests {
             ..Default::default()
         };
 
-        let mut container = Container::new(settings, &event_channel, stats, inspect, None);
+        let mut container = Container::new(settings, &event_channel, &stats, &inspect, None);
         assert_eq!(container.name, name);
 
         let new_name = "renamed_name";
@@ -374,8 +368,8 @@ mod tests {
         let mut container = Container::new(
             settings,
             &event_channel,
-            stats.clone(),
-            inspect.clone(),
+            &stats.clone(),
+            &inspect.clone(),
             None,
         );
 
@@ -441,7 +435,7 @@ mod tests {
                 },
             );
 
-        container.update(stats, inspect);
+        container.update(&stats, &inspect);
         assert_eq!(container.state, status.as_ref());
         assert_eq!(container.health, health.as_ref());
         assert_eq!(container.cpu_percentage, 20.0);
@@ -464,8 +458,8 @@ mod tests {
         let mut container = Container::new(
             settings,
             &event_channel,
-            stats.clone(),
-            inspect.clone(),
+            &stats.clone(),
+            &inspect.clone(),
             None,
         );
 
@@ -515,8 +509,8 @@ mod tests {
         let mut container = Container::new(
             settings,
             &event_channel,
-            stats.clone(),
-            inspect.clone(),
+            &stats.clone(),
+            &inspect.clone(),
             None,
         );
 
@@ -576,8 +570,8 @@ mod tests {
         let mut container = Container::new(
             settings,
             &event_channel,
-            stats.clone(),
-            inspect.clone(),
+            &stats.clone(),
+            &inspect.clone(),
             None,
         );
 
@@ -632,8 +626,8 @@ mod tests {
         let mut container = Container::new(
             settings,
             &event_channel,
-            stats.clone(),
-            inspect.clone(),
+            &stats.clone(),
+            &inspect.clone(),
             None,
         );
 
@@ -672,8 +666,8 @@ mod tests {
         let mut container = Container::new(
             settings,
             &event_channel,
-            stats.clone(),
-            inspect.clone(),
+            &stats.clone(),
+            &inspect.clone(),
             None,
         );
 
@@ -719,8 +713,8 @@ mod tests {
         let mut container = Container::new(
             settings,
             &event_channel,
-            stats.clone(),
-            inspect.clone(),
+            &stats.clone(),
+            &inspect.clone(),
             None,
         );
 
@@ -823,8 +817,8 @@ mod tests {
         let container = Container::new(
             settings.clone(),
             &event_channel,
-            stats,
-            inspect,
+            &stats,
+            &inspect,
             Some(image.into()),
         );
         let topic = container.get_topic();
@@ -848,8 +842,13 @@ mod tests {
             ..Default::default()
         };
 
-        let container =
-            Container::new(settings, &event_channel, stats, inspect, Some(image.into()));
+        let container = Container::new(
+            settings,
+            &event_channel,
+            &stats,
+            &inspect,
+            Some(image.into()),
+        );
 
         let mut recv = event_channel.get_receiver();
         container.publish().await;
@@ -879,8 +878,13 @@ mod tests {
             ..Default::default()
         };
 
-        let container =
-            Container::new(settings, &event_channel, stats, inspect, Some(image.into()));
+        let container = Container::new(
+            settings,
+            &event_channel,
+            &stats,
+            &inspect,
+            Some(image.into()),
+        );
 
         let mut recv = event_channel.get_receiver();
         container.unpublish().await;

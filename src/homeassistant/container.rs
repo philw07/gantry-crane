@@ -31,7 +31,7 @@ impl HomeAssistantContainer {
         container: &ContainerEventInfo,
         node_id: String,
     ) -> Self {
-        HomeAssistantContainer {
+        Self {
             settings,
             event_tx,
             node_id,
@@ -397,10 +397,10 @@ impl HomeAssistantContainer {
     }
 
     pub fn publish(&self) {
-        for sensor in self.sensors.iter() {
+        for sensor in &self.sensors {
             self.publish_entity(sensor);
         }
-        for button in self.buttons.iter() {
+        for button in &self.buttons {
             self.publish_entity(button);
         }
     }
@@ -425,10 +425,10 @@ impl HomeAssistantContainer {
     }
 
     pub fn unpublish(&self) {
-        for sensor in self.sensors.iter() {
+        for sensor in &self.sensors {
             self.unpublish_entity(sensor);
         }
-        for button in self.buttons.iter() {
+        for button in &self.buttons {
             self.unpublish_entity(button);
         }
     }

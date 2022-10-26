@@ -46,9 +46,9 @@ impl From<mqtt::Message> for MqttMessage {
 impl From<MqttMessage> for mqtt::Message {
     fn from(msg: MqttMessage) -> Self {
         if msg.retained {
-            mqtt::Message::new_retained(msg.topic, msg.payload, msg.qos)
+            Self::new_retained(msg.topic, msg.payload, msg.qos)
         } else {
-            mqtt::Message::new(msg.topic, msg.payload, msg.qos)
+            Self::new(msg.topic, msg.payload, msg.qos)
         }
     }
 }
@@ -77,7 +77,7 @@ impl MqttClient {
         let mut client = mqtt::AsyncClient::new(options)?;
         let receiver = Arc::new(RwLock::new(client.get_stream(BUFFER_SIZE_MQTT_RECV)));
 
-        Ok(MqttClient {
+        Ok(Self {
             client: Arc::new(client),
             username: settings.mqtt.username.clone(),
             password: settings.mqtt.password.clone(),
@@ -104,7 +104,6 @@ impl MqttClient {
         if let (Some(user), Some(pass)) = (self.username.as_ref(), self.password.as_ref()) {
             options.user_name(user).password(pass);
         }
-        let options = options.finalize();
 
         // Store availabiliy topic in published topics
         let availabiliy_topic = self.get_availability_topic();
@@ -126,7 +125,7 @@ impl MqttClient {
         });
 
         // Try to connect to broker
-        match self.client.connect(options).await {
+        match self.client.connect(options.finalize()).await {
             Ok(_) => Ok(()),
             Err(e) => {
                 log::error!("Failed to connect to MQTT server: {}", e);
@@ -257,15 +256,7 @@ impl MqttClient {
     async fn publish_state(&self, state: Option<bool>) {
         // Construct message
         let topic = self.get_availability_topic();
-        let payload = if let Some(value) = state {
-            if value {
-                STATE_ONLINE
-            } else {
-                STATE_OFFLINE
-            }
-        } else {
-            ""
-        };
+        let payload = state.map_or("", |value| if value { STATE_ONLINE } else { STATE_OFFLINE });
         let msg = mqtt::Message::new_retained(&topic, payload, 1);
 
         // Publish message

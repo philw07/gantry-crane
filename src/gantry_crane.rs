@@ -51,21 +51,17 @@ pub struct GantryCrane {
 
 impl GantryCrane {
     pub fn new(args: &GantryCraneArgs) -> Result<Self> {
-        match Docker::connect_with_local_defaults() {
-            Ok(docker) => {
-                let event_channel = EventChannel::new();
-                let settings = Arc::new(Settings::new(args.config.as_deref())?);
-                let mqtt = MqttClient::new(&event_channel, settings.clone())?;
-                Ok(GantryCrane {
-                    docker,
-                    settings,
-                    mqtt,
-                    event_channel,
-                    containers: RwLock::new(HashMap::new()),
-                })
-            }
-            Err(e) => panic!("Failed to connect to docker: {}", e),
-        }
+        let docker = Docker::connect_with_local_defaults()?;
+        let event_channel = EventChannel::new();
+        let settings = Arc::new(Settings::new(args.config.as_deref())?);
+        let mqtt = MqttClient::new(&event_channel, settings.clone())?;
+        Ok(Self {
+            docker,
+            settings,
+            mqtt,
+            event_channel,
+            containers: RwLock::new(HashMap::new()),
+        })
     }
 
     pub async fn run_clean(&self) -> Result<()> {
@@ -359,7 +355,7 @@ impl GantryCrane {
                 // Get all stats and inspects
                 let all_info = containers
                     .into_iter()
-                    .flat_map(|c| c.names?.first().cloned())
+                    .filter_map(|c| c.names?.first().cloned())
                     .collect::<Vec<_>>()
                     .iter()
                     .map(|name| self.get_container_stats_and_inspect(name))
@@ -399,11 +395,7 @@ impl GantryCrane {
                     if event.typ == Some(EventMessageTypeEnum::CONTAINER) {
                         let get_container_attr =
                             |actor: &Option<EventActor>, attr: &str| -> Option<String> {
-                                actor
-                                    .to_owned()?
-                                    .attributes?
-                                    .get(attr)
-                                    .map(|name| name.to_owned())
+                                actor.clone()?.attributes?.get(attr).map(ToOwned::to_owned)
                             };
 
                         if let Some(mut container_name) = get_container_attr(&event.actor, "name") {
@@ -437,11 +429,13 @@ impl GantryCrane {
                                         self.rename_container(&old_name, container_name).await;
                                     }
                                 }
-                                Some(DOCKER_EVENT_ACTION_START)
-                                | Some(DOCKER_EVENT_ACTION_STOP)
-                                | Some(DOCKER_EVENT_ACTION_RESTART)
-                                | Some(DOCKER_EVENT_ACTION_PAUSE)
-                                | Some(DOCKER_EVENT_ACTION_UNPAUSE) => {
+                                Some(
+                                    DOCKER_EVENT_ACTION_START
+                                    | DOCKER_EVENT_ACTION_STOP
+                                    | DOCKER_EVENT_ACTION_RESTART
+                                    | DOCKER_EVENT_ACTION_PAUSE
+                                    | DOCKER_EVENT_ACTION_UNPAUSE,
+                                ) => {
                                     // Inform poll loop
                                     if let Err(e) = tx.send(()).await {
                                         log::error!(
@@ -475,12 +469,12 @@ impl GantryCrane {
                 .await;
 
             // Update all containers with the collected stats
-            for res in all_info.into_iter() {
+            for res in all_info {
                 if let (Some(stats), Some(inspect)) = res {
                     // Update container if available
                     let mut containers = self.containers.write().await;
                     if let Some(container) = containers.get_mut(&stats.name) {
-                        container.update(stats, inspect);
+                        container.update(&stats, &inspect);
                         container.publish().await;
                     } else {
                         log::warn!("Got stats for '{}', but no container!", &stats.name);
@@ -514,8 +508,8 @@ impl GantryCrane {
         let container = Container::new(
             self.settings.clone(),
             &self.event_channel,
-            stats,
-            inspect,
+            &stats,
+            &inspect,
             image,
         );
         container.publish().await;
@@ -541,7 +535,7 @@ impl GantryCrane {
     async fn remove_container(&self, name: &str) -> Option<Container> {
         log::debug!("Removing container '{}'", name);
         let container_opt = { self.containers.write().await.remove(name) };
-        if let Some(container) = container_opt.borrow() {
+        if let Some(container) = container_opt.as_ref() {
             container.unpublish().await;
             self.event_channel
                 .send(Event::ContainerRemoved(container.into()));
@@ -612,7 +606,7 @@ impl GantryCrane {
 
     fn is_container_enabled(&self, inspect: &ContainerInspectResponse) -> bool {
         if self.settings.filter_by_label {
-            if let Some(config) = &inspect.config {
+            if let Some(config) = inspect.config.as_ref() {
                 if let Some(labels) = &config.labels {
                     if let Some(value) = labels.get(DOCKER_LABEL_FILTER) {
                         return value == "true";

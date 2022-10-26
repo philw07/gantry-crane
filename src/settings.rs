@@ -27,7 +27,7 @@ impl Default for Settings {
 
 impl Settings {
     pub fn new(config: Option<&str>) -> Result<Self, impl std::error::Error> {
-        Figment::from(Serialized::defaults(Settings::default()))
+        Figment::from(Serialized::defaults(Self::default()))
             .merge(Toml::file(config.unwrap_or(CONFIG_FILE)))
             .merge(Env::raw().map(|k| {
                 if k.starts_with("mqtt_") {
