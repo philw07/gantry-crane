@@ -15,11 +15,11 @@ Note that it's required to mount the docker socket into the container.
 
 ### Using docker
 
-`docker run -d --name gantry-crane --restart=always -v /var/run/docker.sock:/var/run/docker.sock philw07/gantry-crane:latest`
+`docker run -d --name gantry-crane --restart=always -v /var/run/docker.sock:/var/run/docker.sock -e MQTT_HOST=localhost philw07/gantry-crane:latest`
 
 or
 
-`docker run -d --name gantry-crane --restart=always -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/philw07/gantry-crane:latest`
+`docker run -d --name gantry-crane --restart=always -v /var/run/docker.sock:/var/run/docker.sock -e MQTT_HOST=localhost ghcr.io/philw07/gantry-crane:latest`
 
 ### Using docker-compose
 
@@ -33,6 +33,8 @@ services:
     restart: always
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - MQTT_HOST=localhost
 ```
 
 ## Configuration
@@ -71,3 +73,34 @@ Some entities are disabled by default and can be enabled via the Home Assistant 
 The sensors and buttons can be used in automations or scenes, e.g. to start/stop containers at a specific time.
 
 ![Home Assistant integration example](https://github.com/philw07/gantry-crane/raw/master/docs/images/homeassistant_integration_example.png)
+
+## Cleaning up
+
+After stopping gantry-crane, the MQTT messages will be retained.
+That means your container data will still be available on the MQTT broker and in Home Assistant if the integration is active.
+
+To clean up all traces, you can run gantry-crane with the `--clean` flag and it will delete all retained messages.
+Make sure to run it with the same configuration, otherwise it might not delete everything.
+
+### Using docker
+
+`docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -e MQTT_HOST=localhost philw07/gantry-crane:latest --clean`
+
+Make sure to omit `--restart=always`.
+
+### Using docker-compose
+
+```
+version: "3.5"
+
+services:
+  gantry-crane:
+    image: philw07/gantry-crane:latest
+    container_name: gantry-crane
+    # restart: always # Make sure to comment out or remove
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - MQTT_HOST=localhost
+    command: --clean
+```
