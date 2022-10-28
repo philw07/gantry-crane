@@ -56,8 +56,6 @@ impl From<MqttMessage> for mqtt::Message {
 pub struct MqttClient {
     settings: Arc<Settings>,
     client: Arc<mqtt::AsyncClient>,
-    username: Option<String>,
-    password: Option<String>,
     receiver: Arc<RwLock<mqtt::AsyncReceiver<Option<mqtt::Message>>>>,
     published: Arc<RwLock<HashSet<String>>>,
     subscribed: Arc<RwLock<Vec<String>>>,
@@ -79,8 +77,6 @@ impl MqttClient {
 
         Ok(Self {
             client: Arc::new(client),
-            username: settings.mqtt.username.clone(),
-            password: settings.mqtt.password.clone(),
             receiver,
             published: Arc::new(RwLock::new(HashSet::new())),
             subscribed: Arc::new(RwLock::new(Vec::new())),
@@ -101,7 +97,10 @@ impl MqttClient {
             .clean_session(false)
             .will_message(will)
             .automatic_reconnect(Duration::from_secs(2), Duration::from_secs(30));
-        if let (Some(user), Some(pass)) = (self.username.as_ref(), self.password.as_ref()) {
+        if let (Some(user), Some(pass)) = (
+            self.settings.mqtt.username.as_ref(),
+            self.settings.mqtt.password.as_ref(),
+        ) {
             options.user_name(user).password(pass);
         }
 
@@ -268,5 +267,86 @@ impl MqttClient {
                 log::error!("Failed to publish MQTT message: {}", e);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::sync::Arc;
+
+    use crate::{
+        constants::AVAILABILITY_TOPIC,
+        events::{Event, EventChannel},
+        settings::Settings,
+    };
+
+    use super::{MqttClient, MqttMessage};
+    use paho_mqtt as mqtt;
+
+    #[test]
+    fn test_mqtt_message() {
+        let topic = "test/topic";
+        let payload = "[{\"test\": true}]";
+        let retained = true;
+        let qos = 2;
+
+        // Internal to paho
+        let msg = MqttMessage::new(topic.into(), payload.into(), retained, qos);
+        let paho_msg = mqtt::Message::from(msg);
+        assert_eq!(paho_msg.topic(), topic);
+        assert_eq!(paho_msg.payload_str(), payload);
+        assert_eq!(paho_msg.retained(), retained);
+        assert_eq!(paho_msg.qos(), qos);
+
+        // Paho to internal
+        let paho_msg = mqtt::Message::new(topic, payload, qos);
+        let paho_msg_retained = mqtt::Message::new_retained(topic, payload, qos);
+        let msg = MqttMessage::from(paho_msg);
+        assert_eq!(msg.topic, topic);
+        assert_eq!(msg.payload, payload);
+        assert_eq!(msg.retained, false);
+        assert_eq!(msg.qos, qos);
+        let msg = MqttMessage::from(paho_msg_retained);
+        assert_eq!(msg.topic, topic);
+        assert_eq!(msg.payload, payload);
+        assert_eq!(msg.retained, true);
+        assert_eq!(msg.qos, qos);
+    }
+
+    #[tokio::test]
+    async fn test_new() {
+        let settings = temp_env::with_var("MQTT_CLIENT_ID", "test-client-id-abc123".into(), || {
+            Settings::new(None).unwrap()
+        });
+
+        let event_channel = EventChannel::new();
+        let mqtt = MqttClient::new(&event_channel, Arc::new(settings));
+        assert!(mqtt.is_ok());
+        let mqtt = mqtt.unwrap();
+        assert_eq!(mqtt.client.mqtt_version(), mqtt::MQTT_VERSION_3_1_1);
+        assert_eq!(mqtt.client.client_id(), "test-client-id-abc123");
+
+        assert_eq!(mqtt.event_rx.read().await.len(), 0);
+        event_channel.send(Event::MqttConnected);
+        assert_eq!(mqtt.event_rx.read().await.len(), 1);
+
+        let recv = event_channel.get_receiver();
+        assert_eq!(recv.len(), 0);
+        mqtt.event_tx.send(Event::MqttConnected).unwrap();
+        assert_eq!(recv.len(), 1);
+    }
+
+    #[test]
+    fn test_availability_topic() {
+        let settings = temp_env::with_var("MQTT_BASE_TOPIC", "test/base".into(), || {
+            Settings::new(None).unwrap()
+        });
+
+        let event_channel = EventChannel::new();
+        let mqtt = MqttClient::new(&event_channel, Arc::new(settings)).unwrap();
+        assert_eq!(
+            mqtt.get_availability_topic(),
+            format!("test/base/{}", AVAILABILITY_TOPIC)
+        );
     }
 }
