@@ -24,3 +24,20 @@ impl Device {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::Device;
+
+    #[test]
+    fn test_new() {
+        let name = "Test Device".to_owned();
+        let manufacturer = Some("Test Manufacturer".into());
+        let dev = Device::new(name.clone(), manufacturer.clone());
+
+        assert_eq!(dev.name, name);
+        assert_eq!(dev.manufacturer, manufacturer);
+        assert_eq!(dev.identifiers.len(), 1);
+        assert!(!dev.identifiers[0].contains(" "));
+    }
+}
