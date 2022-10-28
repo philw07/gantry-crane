@@ -24,3 +24,6 @@ serde = { version = "1.0.147", features = ["rc"] }
 serde_json = "1.0.87"
 tokio = { version = "1.21.2", features = ["full"] }
 tokio-stream = "0.1.11"
+
+[dev-dependencies]
+temp-env = "0.3.1"
