@@ -65,3 +65,123 @@ impl From<Container> for ContainerEventInfo {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use std::sync::Arc;
+
+    use bollard::{
+        container::{
+            BlkioStats, CPUStats, CPUUsage, MemoryStats, PidsStats, Stats, StorageStats,
+            ThrottlingData,
+        },
+        service::{ContainerInspectResponse, HostConfig},
+    };
+
+    use crate::{container::Container, settings::Settings};
+
+    use super::{ContainerEventInfo, Event, EventChannel};
+
+    #[tokio::test]
+    async fn test_event_channel() {
+        let channel = EventChannel::new();
+        let mut recv = channel.get_receiver();
+
+        assert_eq!(recv.len(), 0);
+        channel.send(Event::MqttConnected);
+        assert_eq!(recv.len(), 1);
+        assert_eq!(recv.recv().await.unwrap(), Event::MqttConnected);
+
+        let sender = channel.get_sender();
+        assert_eq!(recv.len(), 0);
+        sender.send(Event::MqttConnected).unwrap();
+        assert_eq!(recv.len(), 1);
+        assert_eq!(recv.recv().await.unwrap(), Event::MqttConnected);
+    }
+
+    #[test]
+    fn test_container_event_info() {
+        let name = "Test Container";
+
+        let settings = Arc::new(Settings::default());
+        let event_channel = EventChannel::new();
+        let stats = get_stats(&name);
+        let inspect = ContainerInspectResponse {
+            host_config: Some(HostConfig {
+                network_mode: Some("host".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let container = Container::new(settings, &event_channel, &stats, &inspect, None);
+
+        let event_info = ContainerEventInfo::from(&container);
+        assert_eq!(event_info.name, container.get_name());
+        assert_eq!(event_info.is_host_networking, true);
+
+        let event_info = ContainerEventInfo::from(container);
+        assert_eq!(event_info.name, name);
+        assert_eq!(event_info.is_host_networking, true);
+    }
+
+    fn get_stats(name: &str) -> Stats {
+        let cpu = CPUStats {
+            cpu_usage: CPUUsage {
+                percpu_usage: None,
+                total_usage: 1,
+                usage_in_kernelmode: 1,
+                usage_in_usermode: 1,
+            },
+            online_cpus: None,
+            system_cpu_usage: None,
+            throttling_data: ThrottlingData {
+                periods: 1,
+                throttled_periods: 1,
+                throttled_time: 1,
+            },
+        };
+        Stats {
+            id: "".into(),
+            read: "".into(),
+            preread: "".into(),
+            num_procs: 1,
+            pids_stats: PidsStats {
+                current: None,
+                limit: None,
+            },
+            network: None,
+            blkio_stats: BlkioStats {
+                io_merged_recursive: None,
+                io_queue_recursive: None,
+                io_service_bytes_recursive: None,
+                io_service_time_recursive: None,
+                io_serviced_recursive: None,
+                io_time_recursive: None,
+                io_wait_time_recursive: None,
+                sectors_recursive: None,
+            },
+            cpu_stats: cpu.clone(),
+            memory_stats: MemoryStats {
+                commit: None,
+                commit_peak: None,
+                commitbytes: None,
+                commitpeakbytes: None,
+                failcnt: None,
+                limit: None,
+                max_usage: None,
+                privateworkingset: None,
+                stats: None,
+                usage: None,
+            },
+            name: name.into(),
+            networks: None,
+            precpu_stats: cpu,
+            storage_stats: StorageStats {
+                read_count_normalized: None,
+                read_size_bytes: None,
+                write_count_normalized: None,
+                write_size_bytes: None,
+            },
+        }
+    }
+}
