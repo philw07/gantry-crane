@@ -65,10 +65,11 @@ pub struct MqttClient {
 
 impl MqttClient {
     pub fn new(event_channel: &EventChannel, settings: Arc<Settings>) -> Result<Self, mqtt::Error> {
-        let scheme = if settings.mqtt.tls_encryption {
-            "ssl"
-        } else {
-            "tcp"
+        let scheme = match (settings.mqtt.websocket, settings.mqtt.tls_encryption) {
+            (false, false) => "tcp",
+            (false, true) => "ssl",
+            (true, false) => "ws",
+            (true, true) => "wss",
         };
         let uri = format!("{}://{}:{}", scheme, settings.mqtt.host, settings.mqtt.port);
         let options = mqtt::CreateOptionsBuilder::new()

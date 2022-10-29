@@ -6,6 +6,7 @@ host = "localhost"
 port = 1883
 username = ""
 password = ""
+websocket = false
 tls_encryption = false
 ca_certificate = ""
 client_certificate = ""

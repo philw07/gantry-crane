@@ -52,6 +52,7 @@ in which case the location of the file should be passed as argument `--config pa
 | `MQTT_PORT` | 1883 | The port the MQTT broker listens to. |
 | `MQTT_USERNAME` | None | MQTT username, only needed if the broker requires authentication. |
 | `MQTT_PASSWORD` | None | MQTT password, only needed if the broker requires authentication. |
+| `MQTT_WEBSOCKET` | false | Use MQTT over WebSockets. |
 | `MQTT_TLS_ENCRYPTION` | false | Enable or disable tls encryption. |
 | `MQTT_CA_CERTIFICATE` | None | Path to certificate authority file in PEM format. |
 | `MQTT_CLIENT_CERTIFICATE` | None | Path to client certificate file in PEM format. |
