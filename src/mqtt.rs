@@ -65,7 +65,13 @@ pub struct MqttClient {
 
 impl MqttClient {
     pub fn new(event_channel: &EventChannel, settings: Arc<Settings>) -> Result<Self, mqtt::Error> {
-        let uri = format!("tcp://{}:{}", settings.mqtt.host, settings.mqtt.port);
+        let scheme = match (settings.mqtt.websocket, settings.mqtt.tls_encryption) {
+            (false, false) => "tcp",
+            (false, true) => "ssl",
+            (true, false) => "ws",
+            (true, true) => "wss",
+        };
+        let uri = format!("{}://{}:{}", scheme, settings.mqtt.host, settings.mqtt.port);
         let options = mqtt::CreateOptionsBuilder::new()
             .mqtt_version(mqtt::MQTT_VERSION_3_1_1)
             .server_uri(uri)
@@ -97,11 +103,28 @@ impl MqttClient {
             .clean_session(false)
             .will_message(will)
             .automatic_reconnect(Duration::from_secs(2), Duration::from_secs(30));
-        if let (Some(user), Some(pass)) = (
-            self.settings.mqtt.username.as_ref(),
-            self.settings.mqtt.password.as_ref(),
-        ) {
-            options.user_name(user).password(pass);
+
+        // Authentication
+        if let Some(user) = self.settings.mqtt.username.as_ref() {
+            options.user_name(user);
+        }
+        if let Some(password) = self.settings.mqtt.password.as_ref() {
+            options.password(password);
+        }
+
+        // Encryption
+        if self.settings.mqtt.tls_encryption {
+            let mut ssl_options = mqtt::SslOptionsBuilder::new();
+            if let Some(path) = self.settings.mqtt.ca_certificate.as_ref() {
+                ssl_options.trust_store(path)?;
+            }
+            if let Some(path) = self.settings.mqtt.client_certificate.as_ref() {
+                ssl_options.key_store(path)?;
+            }
+            if let Some(path) = self.settings.mqtt.client_key.as_ref() {
+                ssl_options.private_key(path)?;
+            }
+            options.ssl_options(ssl_options.finalize());
         }
 
         // Store availabiliy topic in published topics
