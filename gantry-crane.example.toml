@@ -6,6 +6,10 @@ host = "localhost"
 port = 1883
 username = ""
 password = ""
+tls_encryption = false
+ca_certificate = ""
+client_certificate = ""
+client_key = ""
 client_id = "gantry-crane"
 base_topic = "gantry-crane"
 

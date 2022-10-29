@@ -51,6 +51,10 @@ pub struct MqttSettings {
     pub port: u16,
     pub username: Option<String>,
     pub password: Option<String>,
+    pub tls_encryption: bool,
+    pub ca_certificate: Option<String>,
+    pub client_certificate: Option<String>,
+    pub client_key: Option<String>,
     pub client_id: String,
     pub base_topic: String,
 }
@@ -62,6 +66,10 @@ impl Default for MqttSettings {
             port: 1883,
             username: None,
             password: None,
+            tls_encryption: false,
+            ca_certificate: None,
+            client_certificate: None,
+            client_key: None,
             client_id: APP_NAME.into(),
             base_topic: APP_NAME.into(),
         }
