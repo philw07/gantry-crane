@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::constants::{APP_NAME, CONFIG_FILE};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Settings {
     pub poll_interval: u32,
     pub filter_by_label: bool,
@@ -45,7 +45,7 @@ impl Settings {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MqttSettings {
     pub host: String,
     pub port: u16,
@@ -68,7 +68,7 @@ impl Default for MqttSettings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HomeAssistantSettings {
     pub active: bool,
     pub base_topic: String,
@@ -82,5 +82,39 @@ impl Default for HomeAssistantSettings {
             base_topic: "homeassistant".into(),
             node_id: APP_NAME.into(),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::Settings;
+
+    #[test]
+    fn test_new() {
+        let settings = Settings::new(None);
+        assert!(settings.is_ok());
+
+        let settings = temp_env::with_var_unset("DUMMY", || {
+            // Assuming that there's no settings file in the temp dir
+            Settings::new(Some(std::env::temp_dir().to_str().unwrap())).unwrap()
+        });
+        assert_eq!(
+            settings,
+            Settings {
+                ..Default::default()
+            }
+        );
+
+        let settings = temp_env::with_vars(
+            vec![
+                ("POLL_INTERVAL", "10".into()),
+                ("MQTT_HOST", "mqtt.example.com".into()),
+                ("HOMEASSISTANT_ACTIVE", "true".into()),
+            ],
+            || Settings::new(None).unwrap(),
+        );
+        assert_eq!(settings.poll_interval, 10);
+        assert_eq!(settings.mqtt.host, "mqtt.example.com");
+        assert_eq!(settings.homeassistant.active, true);
     }
 }

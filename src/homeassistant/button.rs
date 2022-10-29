@@ -52,3 +52,62 @@ impl Entity for Button {
         )
     }
 }
+
+#[cfg(test)]
+mod test {
+    use std::sync::Arc;
+
+    use crate::homeassistant::{device::Device, entity::Entity};
+
+    use super::Button;
+
+    #[test]
+    fn test_device_topic() {
+        let dev = Device::new("Test Device".into(), None);
+        let btn = Button {
+            name: "Test Button".into(),
+            availability_topic: None,
+            command_topic: "".into(),
+            device: Arc::new(dev),
+            device_class: None,
+            enabled_by_default: None,
+            entity_category: None,
+            icon: None,
+            object_id: None,
+            payload_available: None,
+            payload_not_available: None,
+            payload_press: "test".into(),
+            retain: None,
+            unique_id: None,
+        };
+
+        assert_eq!(btn.get_device_topic(), "test_device");
+    }
+
+    #[test]
+    fn test_entity() {
+        let dev = Device::new("Test Device".into(), None);
+        let btn = Button {
+            name: "Test Button".into(),
+            availability_topic: None,
+            command_topic: "".into(),
+            device: Arc::new(dev),
+            device_class: None,
+            enabled_by_default: None,
+            entity_category: None,
+            icon: None,
+            object_id: None,
+            payload_available: None,
+            payload_not_available: None,
+            payload_press: "test".into(),
+            retain: None,
+            unique_id: None,
+        };
+
+        let topic = btn.topic("base/topic", "node_id");
+        assert_eq!(
+            topic,
+            "base/topic/button/node_id/test_device__test_button/config"
+        );
+    }
+}

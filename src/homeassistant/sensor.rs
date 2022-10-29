@@ -57,3 +57,66 @@ impl Entity for Sensor {
         )
     }
 }
+
+#[cfg(test)]
+mod test {
+    use std::sync::Arc;
+
+    use crate::homeassistant::{device::Device, entity::Entity};
+
+    use super::Sensor;
+
+    #[test]
+    fn test_device_topic() {
+        let dev = Device::new("Test Device".into(), None);
+        let btn = Sensor {
+            name: "Test Button".into(),
+            state_topic: "".into(),
+            availability_topic: None,
+            device: Arc::new(dev),
+            enabled_by_default: None,
+            entity_category: None,
+            expire_after: None,
+            force_update: None,
+            icon: None,
+            object_id: None,
+            payload_available: None,
+            payload_not_available: None,
+            state_class: None,
+            unique_id: None,
+            unit_of_measurement: None,
+            value_template: None,
+        };
+
+        assert_eq!(btn.get_device_topic(), "test_device");
+    }
+
+    #[test]
+    fn test_entity() {
+        let dev = Device::new("Test Device".into(), None);
+        let btn = Sensor {
+            name: "Test Button".into(),
+            state_topic: "".into(),
+            availability_topic: None,
+            device: Arc::new(dev),
+            enabled_by_default: None,
+            entity_category: None,
+            expire_after: None,
+            force_update: None,
+            icon: None,
+            object_id: None,
+            payload_available: None,
+            payload_not_available: None,
+            state_class: None,
+            unique_id: None,
+            unit_of_measurement: None,
+            value_template: None,
+        };
+
+        let topic = btn.topic("base/topic", "node_id");
+        assert_eq!(
+            topic,
+            "base/topic/sensor/node_id/test_device__test_button/config"
+        );
+    }
+}

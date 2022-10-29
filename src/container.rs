@@ -280,7 +280,7 @@ mod tests {
         },
         service::{
             ContainerInspectResponse, ContainerState, ContainerStateStatusEnum, Health,
-            HealthStatusEnum,
+            HealthStatusEnum, HostConfig,
         },
     };
 
@@ -315,6 +315,7 @@ mod tests {
         );
 
         assert_eq!(container.name, name);
+        assert_eq!(container.get_name(), name);
         assert_eq!(container.image, image);
     }
 
@@ -894,6 +895,25 @@ mod tests {
             recv.recv().await,
             Ok(Event::PublishMqttMessage(expected_msg))
         );
+    }
+
+    #[test]
+    fn test_is_host_networking() {
+        let mut inspect = ContainerInspectResponse {
+            ..Default::default()
+        };
+        assert!(Container::is_host_networking(&inspect).is_none());
+
+        inspect.host_config = Some(HostConfig {
+            ..Default::default()
+        });
+        assert!(Container::is_host_networking(&inspect).is_none());
+
+        inspect.host_config.as_mut().unwrap().network_mode = Some("bridge".into());
+        assert_eq!(Container::is_host_networking(&inspect), Some(false));
+
+        inspect.host_config.as_mut().unwrap().network_mode = Some("host".into());
+        assert_eq!(Container::is_host_networking(&inspect), Some(true));
     }
 
     fn get_stats(name: &str) -> Stats {

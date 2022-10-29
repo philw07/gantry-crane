@@ -447,3 +447,128 @@ impl HomeAssistantContainer {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use std::sync::Arc;
+
+    use crate::{
+        events::{ContainerEventInfo, Event, EventChannel},
+        settings::Settings,
+    };
+
+    use super::HomeAssistantContainer;
+
+    #[test]
+    fn test_new() {
+        let settings = temp_env::with_var_unset("DUMMY", || Settings::new(None).unwrap());
+        let event_channel = EventChannel::new();
+        let container = HomeAssistantContainer::new(
+            Arc::new(settings),
+            event_channel.get_sender(),
+            &ContainerEventInfo {
+                name: "/Container Name".into(),
+                is_host_networking: false,
+            },
+            "node_id".into(),
+        );
+
+        assert_eq!(container.device.name, "Container Name");
+        assert_eq!(container.sensors.len(), 10);
+        assert_eq!(container.buttons.len(), 5);
+    }
+
+    #[test]
+    fn test_publish() {
+        let settings = temp_env::with_var_unset("DUMMY", || Settings::new(None).unwrap());
+        let event_channel = EventChannel::new();
+        let container = HomeAssistantContainer::new(
+            Arc::new(settings),
+            event_channel.get_sender(),
+            &ContainerEventInfo {
+                name: "/Container Name".into(),
+                is_host_networking: false,
+            },
+            "node_id".into(),
+        );
+
+        let recv = event_channel.get_receiver();
+        assert_eq!(recv.len(), 0);
+        container.publish();
+        assert_eq!(recv.len(), 15);
+    }
+
+    #[tokio::test]
+    async fn test_publish_entity() {
+        let settings = temp_env::with_var_unset("DUMMY", || Settings::new(None).unwrap());
+        let event_channel = EventChannel::new();
+        let container = HomeAssistantContainer::new(
+            Arc::new(settings),
+            event_channel.get_sender(),
+            &ContainerEventInfo {
+                name: "/Container Name".into(),
+                is_host_networking: false,
+            },
+            "node_id".into(),
+        );
+        let entity = &container.sensors[0];
+
+        let mut recv = event_channel.get_receiver();
+        assert_eq!(recv.len(), 0);
+        container.publish_entity(entity);
+        assert_eq!(recv.len(), 1);
+
+        let event = recv.recv().await.unwrap();
+        assert!(matches!(event, Event::PublishMqttMessage { .. }));
+        if let Event::PublishMqttMessage(msg) = event {
+            assert_ne!(msg.payload.len(), 0);
+        }
+    }
+
+    #[test]
+    fn test_unpublish() {
+        let settings = temp_env::with_var_unset("DUMMY", || Settings::new(None).unwrap());
+        let event_channel = EventChannel::new();
+        let container = HomeAssistantContainer::new(
+            Arc::new(settings),
+            event_channel.get_sender(),
+            &ContainerEventInfo {
+                name: "/Container Name".into(),
+                is_host_networking: false,
+            },
+            "node_id".into(),
+        );
+
+        let recv = event_channel.get_receiver();
+        assert_eq!(recv.len(), 0);
+        container.unpublish();
+        assert_eq!(recv.len(), 15);
+    }
+
+    #[tokio::test]
+    async fn test_unpublish_entity() {
+        let settings = temp_env::with_var_unset("DUMMY", || Settings::new(None).unwrap());
+        let event_channel = EventChannel::new();
+        let container = HomeAssistantContainer::new(
+            Arc::new(settings),
+            event_channel.get_sender(),
+            &ContainerEventInfo {
+                name: "/Container Name".into(),
+                is_host_networking: false,
+            },
+            "node_id".into(),
+        );
+        let entity = &container.sensors[0];
+
+        let mut recv = event_channel.get_receiver();
+        assert_eq!(recv.len(), 0);
+        container.unpublish_entity(entity);
+        assert_eq!(recv.len(), 1);
+
+        let event = recv.recv().await.unwrap();
+        assert!(matches!(event, Event::PublishMqttMessage { .. }));
+        if let Event::PublishMqttMessage(msg) = event {
+            assert_eq!(msg.payload.len(), 0);
+        }
+    }
+}
