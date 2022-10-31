@@ -1,0 +1,21 @@
+[licenses]
+unlicensed = "deny"
+copyleft = "deny"
+confidence-threshold = 0.93
+allow = ["Apache-2.0", "BSD-3-Clause", "MIT"]
+
+exceptions = [
+    { name = "unicode-ident", allow = [
+        "Unicode-DFS-2016",
+    ] },
+    { name = "paho-mqtt", allow = [
+        "EPL-1.0",
+    ] },
+    { name = "paho-mqtt-sys", allow = [
+        "EPL-1.0",
+    ] },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
