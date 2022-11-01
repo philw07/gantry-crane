@@ -6,6 +6,7 @@ mod gantry_crane;
 mod homeassistant;
 mod mqtt;
 mod settings;
+mod signal_handler;
 mod util;
 
 use anyhow::Result;

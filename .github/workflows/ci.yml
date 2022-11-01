@@ -14,10 +14,19 @@ env:
 jobs:
   build:
     name: Build
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+          - os: windows-2019
     steps:
       - uses: actions/checkout@v3
       - uses: Swatinem/rust-cache@v2
+      - name: Install OpenSSL (Windows)
+        if: matrix.os == 'windows-2019'
+        run: vcpkg install openssl:x64-windows-static
       - name: Build
         uses: actions-rs/cargo@v1
         with:
