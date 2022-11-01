@@ -83,12 +83,13 @@ jobs:
       if: matrix.os == 'windows-2019'
       shell: pwsh
       run: |
+        $archive = "gantry-crane-test-0.0.0-${{ matrix.target }}.zip"
         $compress = @{
           Path = "README.md", "LICENSE", "target/${{ matrix.target }}/release/gantry-crane.exe"
-          DestinationPath = "gantry-crane-test-0.0.0-${{ matrix.target }}.zip"
+          DestinationPath = $archive
         }
         Compress-Archive @compress
-        "ASSET=$compress.DestinationPath" >> $env:GITHUB_ENV
+        "ASSET=$archive" >> $env:GITHUB_ENV
     - name: Upload
       uses: actions/upload-release-asset@v1
       env:
