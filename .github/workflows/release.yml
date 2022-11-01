@@ -32,6 +32,7 @@ jobs:
     needs: ["create-release"]
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
@@ -59,6 +60,10 @@ jobs:
       with:
         toolchain: stable
         target: ${{ matrix.target }}
+    - name: Install Cross
+      if: matrix.cargo == 'cross'
+      run: |
+        cargo install cross
     - name: Build
       run: |
         ${{ matrix.cargo }} build --release --verbose --target ${{ matrix.target }}
