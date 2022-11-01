@@ -62,6 +62,9 @@ jobs:
       if: matrix.cargo == 'cross'
       run: |
         cargo install cross
+    - name: Install OpenSSL (Windows)
+      if: matrix.os == 'windows-latest'
+      run: vcpkg install openssl:x64-windows-static-md
     - name: Build
       run: |
         ${{ matrix.cargo }} build --release --verbose --target ${{ matrix.target }}
