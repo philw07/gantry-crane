@@ -18,7 +18,6 @@ use futures::{
     StreamExt,
 };
 use tokio::{
-    signal::unix::{signal, SignalKind},
     sync::{
         mpsc::{Receiver, Sender},
         RwLock,
@@ -39,6 +38,7 @@ use crate::{
     homeassistant::HomeAssistantIntegration,
     mqtt::{MqttClient, MqttMessage},
     settings::Settings,
+    signal_handler::handle_signals,
 };
 
 pub struct GantryCrane {
@@ -78,7 +78,7 @@ impl GantryCrane {
 
         // Setup signal handler
         tasks.push(tokio::spawn(async {
-            if let Err(e) = Self::handle_signals().await {
+            if let Err(e) = handle_signals().await {
                 log::error!("An error occurred trying to setup signal handlers: {}", e);
             }
         }));
@@ -149,7 +149,7 @@ impl GantryCrane {
 
                 // Setup signal handler
                 tasks.push(tokio::spawn(async {
-                    if let Err(e) = Self::handle_signals().await {
+                    if let Err(e) = handle_signals().await {
                         log::error!("An error occurred trying to setup signal handlers: {}", e);
                     }
                 }));
@@ -194,17 +194,6 @@ impl GantryCrane {
         // Disconnect from MQTT
         self.mqtt.disconnect(false).await;
         result
-    }
-
-    async fn handle_signals() -> Result<()> {
-        let mut sigint = signal(SignalKind::interrupt())?;
-        let mut sigterm = signal(SignalKind::terminate())?;
-
-        tokio::select! {
-            _ = sigint.recv() => log::debug!("Received SIGINT signal"),
-            _ = sigterm.recv() => log::debug!("Received SIGTERM signal"),
-        };
-        Ok(())
     }
 
     async fn handle_mqtt_messages(&self) {
