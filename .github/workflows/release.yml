@@ -22,7 +22,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: 0.1.0 # TODO: Remove
-          release_name: test-0.0.0 # TODO: Remove
+          name: test-0.0.0 # TODO: Remove
           draft: true
 
   build-artifacts:
