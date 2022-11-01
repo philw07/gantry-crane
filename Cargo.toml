@@ -27,3 +27,6 @@ tokio-stream = "0.1.11"
 
 [dev-dependencies]
 temp-env = "0.3.1"
+
+[profile.release]
+strip = "symbols"

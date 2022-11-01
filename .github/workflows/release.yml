@@ -1,0 +1,94 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+    branches: # TODO: Delete
+      - ci-release
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.release.outputs.upload_url }}
+    steps:
+      - name: Create GitHub Release
+        id: release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: 0.1.0 # TODO: ${{ github.ref }}
+          release_name: test-0.0.0 # TODO: Replace all hardcoded versions with ${{ github.ref }}
+          draft: true
+
+  build-artifacts:
+    name: Build Release Artifacts
+    needs: ["create-release"]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            cargo: cargo
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            cargo: cross
+          - os: ubuntu-latest
+            target: armv7-unknown-linux-gnueabihf
+            cargo: cross
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            cargo: cargo
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            cargo: cargo
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            cargo: cargo
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: stable
+        target: ${{ matrix.target }}
+    - name: Build
+      run: |
+        ${{ matrix.cargo }} build --release --verbose --target ${{ matrix.target }}
+    - name: Archive
+      if: matrix.os != 'windows-latest'
+      run: |
+        dir="archive"
+        archive="gantry-crane-test-0.0.0-${{ matrix.target }}.tar.gz"
+        mkdir -p "$dir"
+        cp {README.md,LICENSE,gantry-crane.example.toml} "$dir/"
+        cp "target/${{ matrix.target }}/release/gantry-crane" "$dir/"
+        cd "$dir"
+        tar czf "../$archive" *
+        echo "ASSET=$archive" >> $GITHUB_ENV
+    - name: Archive (Windows)
+      if: matrix.os == 'windows-latest'
+      shell: pwsh
+      run: |
+        $compress = @{
+          Path = "README.md", "LICENSE", "target/${{ matrix.target }}/release/gantry-crane.exe"
+          DestinationPath = "gantry-crane-test-0.0.0-${{ matrix.target }}.zip"
+        }
+        Compress-Archive @compress
+        "ASSET=$compress.DestinationPath" >> $env:GITHUB_ENV
+    - name: Upload
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_path: ${{ env.ASSET }}
+        asset_name: ${{ env.ASSET }}
+        asset_content_type: application/octet-stream
