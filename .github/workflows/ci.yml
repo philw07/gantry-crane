@@ -26,7 +26,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install OpenSSL (Windows)
         if: matrix.os == 'windows-2019'
-        run: vcpkg install openssl:x64-windows-static
+        uses: lukka/run-vcpkg@v10
+        with:
+          runVcpkgInstall: true
+          vcpkgJsonGlob: '.github/vcpkg.json'
       - name: Build
         uses: actions-rs/cargo@v1
         with:
