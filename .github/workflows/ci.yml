@@ -23,10 +23,18 @@ jobs:
           - os: windows-2019
     steps:
       - uses: actions/checkout@v3
+      - uses: actions/cache@v3
+        with:
+          path: ${{ runner.workspace }}\vcpkg_cache
+          key: vcpkg-openssl-${{ runner.os }}
       - uses: Swatinem/rust-cache@v2
       - name: Install OpenSSL (Windows)
-        if: matrix.os == 'windows-2019'
-        run: vcpkg install openssl:x64-windows-static
+        if: runner.os == 'Windows'
+        run: |
+          New-Item -Path "${{ runner.workspace }}" -Name "vcpkg_cache" -ItemType "directory" -Force
+          vcpkg install openssl:x64-windows-static
+        env:
+          VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.workspace }}\vcpkg_cache
       - name: Build
         uses: actions-rs/cargo@v1
         with:
