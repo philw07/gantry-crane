@@ -31,6 +31,8 @@ jobs:
           runVcpkgInstall: true
           vcpkgJsonGlob: '.github/vcpkg.json'
           vcpkgGitCommitId: 94ce0dab56f4d8ba6bd631ba59ed682b02d45c46
+        env:
+          VCPKG_DEFAULT_TRIPLET: x64-windows-static
       - name: Build
         uses: actions-rs/cargo@v1
         with:

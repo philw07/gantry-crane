@@ -2,6 +2,6 @@
     "name": "gantry-crane",
     "version-string": "unversioned",
     "dependencies": [
-        "openssl:x64-windows-static"
+        "openssl"
     ]
 }
