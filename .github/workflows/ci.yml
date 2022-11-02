@@ -30,6 +30,7 @@ jobs:
         with:
           runVcpkgInstall: true
           vcpkgJsonGlob: '.github/vcpkg.json'
+          vcpkgGitCommitId: 94ce0dab56f4d8ba6bd631ba59ed682b02d45c46
       - name: Build
         uses: actions-rs/cargo@v1
         with:
