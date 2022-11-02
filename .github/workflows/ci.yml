@@ -10,6 +10,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  VCPKG_BINARY_SOURCES: 'clear;nuget,GitHub,readwrite'
 
 jobs:
   build:
@@ -24,19 +25,25 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: Swatinem/rust-cache@v2
+      - name: Setup vcpkg/NuGet
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          `vcpkg fetch nuget | tail -n 1` \
+            sources add \
+            -source "https://nuget.pkg.github.com/philw07/index.json" \
+            -storepasswordincleartext \
+            -name "GitHub" \
+            -username "philw07" \
+            -password "${{ secrets.GITHUB_TOKEN }}"
+          `vcpkg fetch nuget | tail -n 1` \
+            setapikey "${{ secrets.GITHUB_TOKEN }}" \
+            -source "https://nuget.pkg.github.com/philw07/index.json"
       - name: Install OpenSSL (Windows)
         if: runner.os == 'Windows'
-        uses: lukka/run-vcpkg@v10
-        with:
-          runVcpkgInstall: true
-          vcpkgJsonGlob: '.github/vcpkg.json'
-          vcpkgGitCommitId: 94ce0dab56f4d8ba6bd631ba59ed682b02d45c46
-        env:
-          VCPKG_DEFAULT_TRIPLET: x64-windows-static
-      - name: Workaround for GHA setting VCPKG_ROOT
-        if: runner.os == 'Windows'
+        shell: bash
         run: |
-          ${{ github.workspace }}/vcpkg/vcpkg.exe integrate install --vcpkg-root '${{ github.workspace }}/vcpkg'
+          vcpkg install openssl:x64-windows-static
       - name: Build
         uses: actions-rs/cargo@v1
         with:
