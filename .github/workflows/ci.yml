@@ -32,6 +32,7 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           New-Item -Path "${{ runner.workspace }}" -Name "vcpkg_cache" -ItemType "directory" -Force
+          vcpkg integrate install
           vcpkg install openssl:x64-windows-static
         env:
           VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.workspace }}\vcpkg_cache
