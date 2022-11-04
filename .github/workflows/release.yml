@@ -64,8 +64,10 @@ jobs:
         cargo install cross
 
     - name: Install OpenSSL (Windows)
-      if: matrix.os == 'windows-2019'
-      run: vcpkg install openssl:x64-windows-static
+      if: runner.os == 'Windows'
+      run: |
+        vcpkg integrate install
+        vcpkg install openssl:x64-windows-static
 
     - name: Install OpenSSL (macOS ARM64)
       if: matrix.target == 'aarch64-apple-darwin'
