@@ -22,7 +22,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: 0.1.0 # TODO: Remove
-          name: test-0.0.0 # TODO: Remove
+          name: 0.1.0 # TODO: Remove
           draft: true
 
   build-artifacts:
@@ -62,28 +62,43 @@ jobs:
       if: matrix.cargo == 'cross'
       run: |
         cargo install cross
+
     - name: Install OpenSSL (Windows)
       if: matrix.os == 'windows-2019'
       run: vcpkg install openssl:x64-windows-static
+
+    - name: Install OpenSSL (macOS ARM64)
+      if: matrix.target == 'aarch64-apple-darwin'
+      run: |
+        brew fetch --force --bottle-tag=arm64_monterey openssl@3 |
+        grep -E "(Downloaded to:|Already downloaded:)" |
+        grep -v pkg-config |
+        awk '{ print $3 }' |
+        xargs -n 1 brew install --force-bottle
+        echo "PKG_CONFIG_PATH=/usr/local/opt/openssl@3/lib/pkgconfig" >> $GITHUB_ENV
+        echo "PKG_CONFIG_ALLOW_CROSS=1" >> $GITHUB_ENV
+
     - name: Build
       run: |
         ${{ matrix.cargo }} build --release --verbose --target ${{ matrix.target }}
+
     - name: Archive # TODO: Replace harcoded version with #{{ github.ref_name }}
       if: matrix.os != 'windows-2019'
       run: |
         dir="archive"
-        archive="gantry-crane-test-0.0.0-${{ matrix.target }}.tar.gz"
+        archive="gantry-crane-0.1.0-${{ matrix.target }}.tar.gz"
         mkdir -p "$dir"
         cp {README.md,LICENSE,gantry-crane.example.toml} "$dir/"
         cp "target/${{ matrix.target }}/release/gantry-crane" "$dir/"
         cd "$dir"
         tar czf "../$archive" *
         echo "ASSET=$archive" >> $GITHUB_ENV
+
     - name: Archive (Windows) # TODO: Replace harcoded version with #{{ github.ref_name }}
       if: matrix.os == 'windows-2019'
       shell: pwsh
       run: |
-        $archive = "gantry-crane-test-0.0.0-${{ matrix.target }}.zip"
+        $archive = "gantry-crane-0.1.0-${{ matrix.target }}.zip"
         $compress = @{
           Path = "README.md", "LICENSE", "target/${{ matrix.target }}/release/gantry-crane.exe"
           DestinationPath = $archive
