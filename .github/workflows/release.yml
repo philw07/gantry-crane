@@ -4,8 +4,6 @@ on:
   push:
     tags:
       - "[0-9]+.[0-9]+.[0-9]+"
-    branches: # TODO: Delete
-      - ci-release
 
 env:
   CARGO_TERM_COLOR: always
@@ -21,8 +19,6 @@ jobs:
         id: release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: 0.1.0 # TODO: Remove
-          name: 0.1.0 # TODO: Remove
           draft: true
 
   build-artifacts:
@@ -84,11 +80,11 @@ jobs:
       run: |
         ${{ matrix.cargo }} build --release --verbose --target ${{ matrix.target }}
 
-    - name: Archive # TODO: Replace harcoded version with #{{ github.ref_name }}
-      if: matrix.os != 'windows-2019'
+    - name: Archive
+      if: runner.os != 'Windows'
       run: |
         dir="archive"
-        archive="gantry-crane-0.1.0-${{ matrix.target }}.tar.gz"
+        archive="gantry-crane-${{ github.ref_name }}-${{ matrix.target }}.tar.gz"
         mkdir -p "$dir"
         cp {README.md,LICENSE,gantry-crane.example.toml} "$dir/"
         cp "target/${{ matrix.target }}/release/gantry-crane" "$dir/"
@@ -96,17 +92,18 @@ jobs:
         tar czf "../$archive" *
         echo "ASSET=$archive" >> $GITHUB_ENV
 
-    - name: Archive (Windows) # TODO: Replace harcoded version with #{{ github.ref_name }}
-      if: matrix.os == 'windows-2019'
+    - name: Archive (Windows)
+      if: runner.os == 'Windows'
       shell: pwsh
       run: |
-        $archive = "gantry-crane-0.1.0-${{ matrix.target }}.zip"
+        $archive = "gantry-crane-${{ github.ref_name }}-${{ matrix.target }}.zip"
         $compress = @{
           Path = "README.md", "LICENSE", "target/${{ matrix.target }}/release/gantry-crane.exe"
           DestinationPath = $archive
         }
         Compress-Archive @compress
         "ASSET=$archive" >> $env:GITHUB_ENV
+
     - name: Upload
       uses: actions/upload-release-asset@v1
       env:
