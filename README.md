@@ -1,13 +1,35 @@
-# gantry-crane 🏗️
+<!-- NOTE: Links to files in the repository are absolute so they work on docker hub -->
 
-[![CI status](https://img.shields.io/github/workflow/status/philw07/gantry-crane/CI?label=CI&logo=github&style=flat-square)](https://github.com/philw07/gantry-crane/actions/workflows/ci.yml)
-[![Docker status](https://img.shields.io/github/workflow/status/philw07/gantry-crane/Docker?label=Docker&logo=github&style=flat-square)](https://github.com/philw07/gantry-crane/actions/workflows/docker.yml)
-[![Dependency status](https://deps.rs/repo/github/philw07/gantry-crane/status.svg?style=flat-square)](https://deps.rs/repo/github/philw07/gantry-crane)
-[![Code coverage](https://img.shields.io/codecov/c/gh/philw07/gantry-crane?style=flat-square)](https://app.codecov.io/github/philw07/gantry-crane)
-[![License](https://img.shields.io/github/license/philw07/gantry-crane?style=flat-square)](https://github.com/philw07/gantry-crane/blob/master/LICENSE)
+<div align="center">
+  <img alt="gantry-crane logo" width="250px" src="https://github.com/philw07/gantry-crane/blob/master/docs/images/gantry-crane-logo.svg">
 
-A Docker to MQTT bridge which publishes information about your containers for other software to consume and allows to control them.  
-Comes with a built-in [Home Assistant](https://www.home-assistant.io/) integration to monitor and control your containers right within Home Assistant.
+  <h1>gantry-crane</h1>
+
+  <div>
+    <a title="CI status" href="https://github.com/philw07/gantry-crane/actions/workflows/ci.yml">
+      <img src="https://img.shields.io/github/workflow/status/philw07/gantry-crane/CI?label=CI&logo=github&style=flat-square">
+    </a>
+    <a title="Docker status" href="https://github.com/philw07/gantry-crane/actions/workflows/docker.yml">
+      <img src="https://img.shields.io/github/workflow/status/philw07/gantry-crane/Docker?label=Docker&logo=github&style=flat-square">
+    </a>
+    <a title="Dependency status" href="https://deps.rs/repo/github/philw07/gantry-crane">
+      <img src="https://deps.rs/repo/github/philw07/gantry-crane/status.svg?style=flat-square">
+    </a>
+    <a title="Code coverage" href="https://app.codecov.io/github/philw07/gantry-crane">
+      <img src="https://img.shields.io/codecov/c/gh/philw07/gantry-crane?style=flat-square">
+    </a>
+    <a title="License" href="https://github.com/philw07/gantry-crane/blob/master/LICENSE">
+      <img src="https://img.shields.io/github/license/philw07/gantry-crane?style=flat-square">
+    </a>
+  </div>
+
+  <br>
+  <p>
+    A Docker to MQTT bridge which publishes information about your containers for other software to consume and allows to control them.<br>
+    Comes with a built-in <a href="https://www.home-assistant.io/">Home Assistant</a> integration to monitor and control your containers right within Home Assistant.
+  </p>
+  <br>
+</div>
 
 ## Getting started
 
