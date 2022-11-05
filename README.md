@@ -1,7 +1,7 @@
 <!-- NOTE: Links to files in the repository are absolute so they work on docker hub -->
 
 <div align="center">
-  <img alt="gantry-crane logo" width="250px" src="https://github.com/philw07/gantry-crane/blob/master/docs/images/gantry-crane-logo.svg">
+  <img alt="gantry-crane logo" width="250px" src="https://raw.githubusercontent.com/philw07/gantry-crane/master/docs/images/gantry-crane-logo.svg">
 
   <h1>gantry-crane</h1>
 
@@ -100,7 +100,7 @@ Some entities are disabled by default and can be enabled via the Home Assistant 
 
 The sensors and buttons can be used in automations or scenes, e.g. to start/stop containers at a specific time.
 
-![Home Assistant integration example](https://github.com/philw07/gantry-crane/raw/master/docs/images/homeassistant_integration_example.png)
+![Home Assistant integration example](https://raw.githubusercontent.com/philw07/gantry-crane/master/docs/images/homeassistant_integration_example.png)
 
 ## Cleaning up
 
