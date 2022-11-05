@@ -8,7 +8,7 @@ license = "MIT"
 readme = "README.md"
 homepage = "https://github.com/philw07/gantry-crane"
 repository = "https://github.com/philw07/gantry-crane"
-keywords = ["docker", "mqtt", "bridge", "home assistant"]
+keywords = ["docker", "mqtt", "bridge", "home-assistant", "home-automation", "iot"]
 categories = ["command-line-utilities"]
 
 [dependencies]
