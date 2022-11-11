@@ -7,8 +7,13 @@ use std::{
 
 use anyhow::Result;
 use bollard::{
-    container::{ListContainersOptions, Stats, StatsOptions},
-    service::{ContainerInspectResponse, EventActor, EventMessageTypeEnum},
+    container::{
+        Config, CreateContainerOptions, ListContainersOptions, RenameContainerOptions, Stats,
+        StatsOptions, WaitContainerOptions,
+    },
+    image::CreateImageOptions,
+    network::ConnectNetworkOptions,
+    service::{ContainerInspectResponse, EventActor, EventMessageTypeEnum, ImageInspect},
     system::EventsOptions,
     Docker,
 };
@@ -28,10 +33,13 @@ use tokio::{
 use crate::{
     args::GantryCraneArgs,
     constants::{
-        APP_NAME, APP_VERSION, BUFFER_SIZE_POLL_CHANNEL, DOCKER_EVENT_ACTION_CREATE,
-        DOCKER_EVENT_ACTION_DESTROY, DOCKER_EVENT_ACTION_PAUSE, DOCKER_EVENT_ACTION_RENAME,
-        DOCKER_EVENT_ACTION_RESTART, DOCKER_EVENT_ACTION_START, DOCKER_EVENT_ACTION_STOP,
-        DOCKER_EVENT_ACTION_UNPAUSE, DOCKER_LABEL_FILTER, SET_STATE_TOPIC,
+        APP_NAME, APP_VERSION, BUFFER_SIZE_POLL_CHANNEL, CONTAINER_REQUEST_PAUSE,
+        CONTAINER_REQUEST_PULL_RECREATE, CONTAINER_REQUEST_RECREATE, CONTAINER_REQUEST_RESTART,
+        CONTAINER_REQUEST_START, CONTAINER_REQUEST_STOP, CONTAINER_REQUEST_UNPAUSE,
+        DOCKER_EVENT_ACTION_CREATE, DOCKER_EVENT_ACTION_DESTROY, DOCKER_EVENT_ACTION_PAUSE,
+        DOCKER_EVENT_ACTION_RENAME, DOCKER_EVENT_ACTION_RESTART, DOCKER_EVENT_ACTION_START,
+        DOCKER_EVENT_ACTION_STOP, DOCKER_EVENT_ACTION_UNPAUSE, DOCKER_LABEL_FILTER,
+        SET_STATE_TOPIC,
     },
     container::Container,
     events::{Event, EventChannel},
@@ -244,7 +252,7 @@ impl GantryCrane {
                         }
 
                         match msg.payload.as_str() {
-                            DOCKER_EVENT_ACTION_START => {
+                            CONTAINER_REQUEST_START => {
                                 log::info!(
                                     "Trying to {} container '{}'",
                                     msg.payload,
@@ -258,7 +266,7 @@ impl GantryCrane {
                                     log::error!("Failed to {} container: {}", msg.payload, e);
                                 };
                             }
-                            DOCKER_EVENT_ACTION_STOP => {
+                            CONTAINER_REQUEST_STOP => {
                                 log::info!(
                                     "Trying to {} container '{}'",
                                     msg.payload,
@@ -270,7 +278,7 @@ impl GantryCrane {
                                     log::error!("Failed to {} container: {}", msg.payload, e);
                                 };
                             }
-                            DOCKER_EVENT_ACTION_RESTART => {
+                            CONTAINER_REQUEST_RESTART => {
                                 log::info!(
                                     "Trying to {} container '{}'",
                                     msg.payload,
@@ -284,7 +292,7 @@ impl GantryCrane {
                                     log::error!("Failed to {} container: {}", msg.payload, e);
                                 };
                             }
-                            DOCKER_EVENT_ACTION_PAUSE => {
+                            CONTAINER_REQUEST_PAUSE => {
                                 log::info!(
                                     "Trying to {} container '{}'",
                                     msg.payload,
@@ -296,7 +304,7 @@ impl GantryCrane {
                                     log::error!("Failed to {} container: {}", msg.payload, e);
                                 };
                             }
-                            DOCKER_EVENT_ACTION_UNPAUSE => {
+                            CONTAINER_REQUEST_UNPAUSE => {
                                 log::info!(
                                     "Trying to {} container '{}'",
                                     msg.payload,
@@ -307,6 +315,40 @@ impl GantryCrane {
                                 {
                                     log::error!("Failed to {} container: {}", msg.payload, e);
                                 };
+                            }
+                            CONTAINER_REQUEST_RECREATE | CONTAINER_REQUEST_PULL_RECREATE => {
+                                let pull = msg.payload.as_str() == CONTAINER_REQUEST_PULL_RECREATE;
+                                log::info!("Trying to recreate container '{}'", container_name);
+                                match self
+                                    .docker
+                                    .inspect_container(&container_name[1..], None)
+                                    .await
+                                {
+                                    Ok(inspect) => {
+                                        if let Some(image) = inspect.image.as_deref() {
+                                            match self.docker.inspect_image(image).await {
+                                                Ok(image_inspect) => {
+                                                    self.recrate_container(
+                                                        inspect,
+                                                        image_inspect,
+                                                        pull,
+                                                    )
+                                                    .await
+                                                }
+                                                Err(e) => log::error!(
+                                                    "Failed to inspect image '{}': {}",
+                                                    image,
+                                                    e
+                                                ),
+                                            }
+                                        }
+                                    }
+                                    Err(e) => log::error!(
+                                        "Failed to inspect container '{}': {}",
+                                        container_name,
+                                        e
+                                    ),
+                                }
                             }
                             _ => log::warn!(
                                 "Received unknown payload in set state message: {}",
@@ -535,12 +577,226 @@ impl GantryCrane {
     }
 
     async fn rename_container(&self, old_name: &str, new_name: String) {
+        log::info!("Renaming container '{}' to '{}'", old_name, new_name);
         if let Some(mut container) = self.remove_container(old_name).await {
-            log::info!("Renaming container '{}' to '{}'", old_name, new_name);
             container.rename(new_name);
             self.add_container(container).await;
         } else {
             log::warn!("Received rename event for unknown container '{}'", old_name);
+        }
+    }
+
+    async fn recrate_container(
+        &self,
+        container_inspect: ContainerInspectResponse,
+        image_inspect: ImageInspect,
+        pull: bool,
+    ) {
+        let is_host_networking = Container::is_host_networking(&container_inspect);
+        if let (Some(container_name), Some(container_config), Some(image_config)) = (
+            container_inspect.name.as_deref(),
+            container_inspect.config,
+            image_inspect.config,
+        ) {
+            // Pull new image
+            let mut image_tag = None;
+            if pull {
+                if let Some(mut image) = container_config.image.clone() {
+                    log::info!("Pulling image '{}'", image);
+
+                    // Add the latest tag if none is given.
+                    // Otherwise all tags for the image will be pulled.
+                    if !image.contains(':') {
+                        image.push_str(":latest");
+                    }
+                    let options = CreateImageOptions {
+                        from_image: image.as_str(),
+                        ..Default::default()
+                    };
+                    let mut stream = self.docker.create_image(Some(options), None, None);
+                    while let Some(res) = stream.next().await {
+                        if let Err(e) = res {
+                            log::error!("Error pulling image '{}': {}", image, e);
+                            return;
+                        }
+                    }
+                    drop(stream);
+                    image_tag = Some(image);
+                } else {
+                    log::warn!(
+                        "Skipping pull due to unknown image for container '{}'",
+                        container_name
+                    );
+                }
+            }
+
+            // Create config for new container.
+            // Only keep config which is different from the image config.
+            let mut config = Config::from(container_config);
+            macro_rules! remove_equal {
+                (Option, $($x:ident),+) => {
+                    $(
+                        if config.$x == image_config.$x {
+                            config.$x = None;
+                        }
+                    )*
+                };
+                (Vec, $($x:ident),+) => {
+                    $(
+                        if let (Some($x), Some(image)) = (config.$x.as_mut(), image_config.$x.as_ref()) {
+                            $x.retain(|el| !image.contains(el));
+                        }
+                    )*
+                };
+                (HashMap, $($x:ident),+) => {
+                    $(
+                        if let (Some($x), Some(image)) =
+                            (config.$x.as_mut(), image_config.$x.as_ref())
+                        {
+                            $x.retain(|k, v| image.get(k) != Some(v));
+                        }
+                    )*
+                };
+            }
+            remove_equal!(Option, cmd, entrypoint, user, working_dir);
+            remove_equal!(Vec, env);
+            remove_equal!(HashMap, labels, volumes, exposed_ports);
+
+            config.host_config = container_inspect.host_config;
+
+            // Only keep hostname in case it's not the default (first 12 chars of container ID)
+            if let Some(id) = container_inspect.id.as_deref() {
+                if let Some(hostname) = config.hostname.as_deref() {
+                    if &id[..12] == hostname {
+                        config.hostname = None;
+                    }
+                }
+            }
+
+            let name = container_name[1..].to_string();
+            let name_temp = format!("{}_old", name);
+            let is_autoremove = if let Some(host_config) = config.host_config.as_ref() {
+                host_config.auto_remove.unwrap_or(false)
+            } else {
+                false
+            };
+
+            // Rename old container
+            async fn rename(docker: &Docker, old: &str, new: &str) -> bool {
+                log::debug!("Renaming container '{}' to '{}'", old, new);
+                if let Err(e) = docker
+                    .rename_container(old, RenameContainerOptions { name: new })
+                    .await
+                {
+                    log::error!("Failed to rename container '{}': {}", old, e);
+                    return false;
+                }
+                true
+            }
+            if !rename(&self.docker, &name, &name_temp).await {
+                return;
+            }
+
+            // Stop old container
+            log::debug!("Stopping old container '{}'", name_temp);
+            if let Err(e) = self.docker.stop_container(&name_temp, None).await {
+                log::error!("Failed to stop container '{}': {}", name_temp, e);
+                return;
+            }
+            _ = self
+                .docker
+                .wait_container::<&str>(&name_temp, None)
+                .collect::<Vec<_>>()
+                .await;
+
+            // Create new container
+            log::debug!("Creating new container '{}'", name);
+            if let Err(e) = self
+                .docker
+                .create_container(Some(CreateContainerOptions { name: &name }), config)
+                .await
+            {
+                log::error!("Failed to create container '{}': {}", container_name, e);
+                // Rename old container back
+                rename(&self.docker, &name_temp, &name).await;
+                if let Err(e) = self.docker.start_container::<String>(&name, None).await {
+                    log::error!(
+                        "Failed to start old container after renaming it back: {}",
+                        e
+                    );
+                }
+                return;
+            }
+
+            // Attach networks
+            if !is_host_networking {
+                if let Some(network_settings) = container_inspect.network_settings {
+                    if let Some(networks) = network_settings.networks {
+                        for (network, config) in networks {
+                            if let Err(e) = self
+                                .docker
+                                .connect_network(
+                                    &network,
+                                    ConnectNetworkOptions {
+                                        container: &name,
+                                        endpoint_config: config,
+                                    },
+                                )
+                                .await
+                            {
+                                log::error!(
+                                    "Failed to connect container '{}' to network '{}': {}",
+                                    name,
+                                    network,
+                                    e
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Start new container
+            log::debug!("Starting new container '{}'", name);
+            if let Err(e) = self.docker.start_container::<String>(&name, None).await {
+                log::error!("Failed to start container '{}': {}", name, e);
+            }
+
+            // Remove old container
+            if !is_autoremove {
+                log::debug!("Removing old container '{}'", name_temp);
+                if let Err(e) = self.docker.remove_container(&name_temp, None).await {
+                    log::error!("Failed to remove container '{}': {}", name_temp, e);
+                    return;
+                }
+            }
+            _ = self
+                .docker
+                .wait_container(
+                    &name_temp,
+                    Some(WaitContainerOptions {
+                        condition: "removed",
+                    }),
+                )
+                .collect::<Vec<_>>()
+                .await;
+
+            // Delete old image, but only if a new image was pulled
+            if let (Some(tag), Some(image_id)) = (image_tag, image_inspect.id) {
+                if let Ok(new_image_inspect) = self.docker.inspect_image(&tag).await {
+                    if new_image_inspect.id.as_deref().unwrap_or(&image_id) != image_id {
+                        if !image_id.starts_with("sha256:") {
+                            log::debug!("Unknown value, couldn't delete old image '{}'", image_id);
+                        } else {
+                            let id = &image_id[7..];
+                            log::info!("Deleting old image '{}'", id);
+                            if let Err(e) = self.docker.remove_image(id, None, None).await {
+                                log::error!("Failed to delete old image '{}': {}", id, e);
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
