@@ -22,24 +22,17 @@ use futures::{
     stream::{FuturesOrdered, FuturesUnordered},
     StreamExt,
 };
-use tokio::{
-    sync::{
-        mpsc::{Receiver, Sender},
-        RwLock,
-    },
-    time,
-};
+use tokio::{sync::RwLock, time};
 
 use crate::{
     args::GantryCraneArgs,
     constants::{
-        APP_NAME, APP_VERSION, BUFFER_SIZE_POLL_CHANNEL, CONTAINER_REQUEST_PAUSE,
-        CONTAINER_REQUEST_PULL_RECREATE, CONTAINER_REQUEST_RECREATE, CONTAINER_REQUEST_RESTART,
-        CONTAINER_REQUEST_START, CONTAINER_REQUEST_STOP, CONTAINER_REQUEST_UNPAUSE,
-        DOCKER_EVENT_ACTION_CREATE, DOCKER_EVENT_ACTION_DESTROY, DOCKER_EVENT_ACTION_PAUSE,
-        DOCKER_EVENT_ACTION_RENAME, DOCKER_EVENT_ACTION_RESTART, DOCKER_EVENT_ACTION_START,
-        DOCKER_EVENT_ACTION_STOP, DOCKER_EVENT_ACTION_UNPAUSE, DOCKER_LABEL_FILTER,
-        SET_STATE_TOPIC,
+        APP_NAME, APP_VERSION, CONTAINER_REQUEST_PAUSE, CONTAINER_REQUEST_PULL_RECREATE,
+        CONTAINER_REQUEST_RECREATE, CONTAINER_REQUEST_RESTART, CONTAINER_REQUEST_START,
+        CONTAINER_REQUEST_STOP, CONTAINER_REQUEST_UNPAUSE, DOCKER_EVENT_ACTION_CREATE,
+        DOCKER_EVENT_ACTION_DESTROY, DOCKER_EVENT_ACTION_PAUSE, DOCKER_EVENT_ACTION_RENAME,
+        DOCKER_EVENT_ACTION_RESTART, DOCKER_EVENT_ACTION_START, DOCKER_EVENT_ACTION_STOP,
+        DOCKER_EVENT_ACTION_UNPAUSE, DOCKER_LABEL_FILTER, SET_STATE_TOPIC,
     },
     container::Container,
     events::{Event, EventChannel},
@@ -185,13 +178,12 @@ impl GantryCrane {
                 }
 
                 // Run tasks until the first one finishes
-                let (tx, rx) = tokio::sync::mpsc::channel::<()>(BUFFER_SIZE_POLL_CHANNEL);
                 tokio::select! {
                     _ = select_all(tasks) => (),
                     _ = mqtt_fut => log::debug!("MQTT event loop ended"),
                     _ = self.handle_mqtt_messages() => log::debug!("handle_mqtt_messages() ended"),
-                    _ = self.events_loop(tx) => log::debug!("listen_for_events() ended"),
-                    _ = self.poll_loop(rx) => log::debug!("poll_containers() ended"),
+                    _ = self.events_loop() => log::debug!("listen_for_events() ended"),
+                    _ = self.poll_loop() => log::debug!("poll_containers() ended"),
                 }
             }
             Err(e) => result = Err(e),
@@ -412,7 +404,7 @@ impl GantryCrane {
     }
 
     /// Listens to docker container events endlessly and creates, removes or renames containers accordingly.
-    async fn events_loop(&self, tx: Sender<()>) {
+    async fn events_loop(&self) {
         // Listen to events
         let mut stream = self.docker.events(Some(EventsOptions::<String> {
             until: None,
@@ -467,13 +459,8 @@ impl GantryCrane {
                                     | DOCKER_EVENT_ACTION_PAUSE
                                     | DOCKER_EVENT_ACTION_UNPAUSE,
                                 ) => {
-                                    // Inform poll loop
-                                    if let Err(e) = tx.send(()).await {
-                                        log::error!(
-                                            "Failed to send message through channel: {}",
-                                            e
-                                        );
-                                    }
+                                    // Force polling
+                                    self.event_channel.send(Event::ForcePoll);
                                 }
                                 _ => continue,
                             }
@@ -485,8 +472,9 @@ impl GantryCrane {
     }
 
     /// Regularly polls all known containers and updates them accordingly.
-    async fn poll_loop(&self, mut rx: Receiver<()>) {
-        let mut channel_open = true;
+    async fn poll_loop(&self) {
+        let mut rx = self.event_channel.get_receiver();
+        let mut polling_active = true;
         loop {
             log::info!("Polling all containers");
             let names: Vec<String> = self.containers.read().await.keys().cloned().collect();
@@ -513,19 +501,45 @@ impl GantryCrane {
                 }
             }
 
-            // Wait for the next iteration or message
-            let sleep_fut = time::sleep(Duration::from_secs(self.settings.poll_interval as u64));
-            if channel_open {
+            // Wait for the next iteration or forced poll
+            let next_poll =
+                Instant::now() + Duration::from_secs(self.settings.poll_interval as u64);
+            loop {
+                // Sleep at least of 100ms
+                let mut sleep_time = next_poll - Instant::now();
+                if sleep_time.as_nanos() == 0 {
+                    sleep_time = Duration::from_millis(100);
+                }
+
                 tokio::select! {
-                    _ = sleep_fut => (),
-                    msg = rx.recv() => {
-                        if msg.is_none() {
-                            channel_open = false;
+                    _ = time::sleep(sleep_time) => {
+                        if polling_active {
+                            break;
+                        }
+                    },
+                    ev = rx.recv() => {
+                        match ev {
+                            Ok(Event::ForcePoll) => {
+                                if polling_active {
+                                    break;
+                                }
+                            },
+                            Ok(Event::SuspendPolling) => {
+                                polling_active = false;
+                                log::debug!("Suspending polling");
+                            },
+                            Ok(Event::ResumePolling) => {
+                                polling_active = true;
+                                log::debug!("Resuming polling");
+
+                                // Poll immediately after resuming
+                                break;
+                            },
+                            Err(e) => log::error!("Error reading from channel: {}", e),
+                            _ => (),
                         }
                     },
                 }
-            } else {
-                sleep_fut.await;
             }
         }
     }
@@ -681,9 +695,11 @@ impl GantryCrane {
                 false
             };
 
+            // Suspend polling while recreating container
+            self.event_channel.send(Event::SuspendPolling);
+
             // Rename old container
             async fn rename(docker: &Docker, old: &str, new: &str) -> bool {
-                log::debug!("Renaming container '{}' to '{}'", old, new);
                 if let Err(e) = docker
                     .rename_container(old, RenameContainerOptions { name: new })
                     .await
@@ -694,6 +710,7 @@ impl GantryCrane {
                 true
             }
             if !rename(&self.docker, &name, &name_temp).await {
+                self.event_channel.send(Event::ResumePolling);
                 return;
             }
 
@@ -701,6 +718,7 @@ impl GantryCrane {
             log::debug!("Stopping old container '{}'", name_temp);
             if let Err(e) = self.docker.stop_container(&name_temp, None).await {
                 log::error!("Failed to stop container '{}': {}", name_temp, e);
+                self.event_channel.send(Event::ResumePolling);
                 return;
             }
             _ = self
@@ -725,6 +743,7 @@ impl GantryCrane {
                         e
                     );
                 }
+                self.event_channel.send(Event::ResumePolling);
                 return;
             }
 
@@ -760,13 +779,27 @@ impl GantryCrane {
             log::debug!("Starting new container '{}'", name);
             if let Err(e) = self.docker.start_container::<String>(&name, None).await {
                 log::error!("Failed to start container '{}': {}", name, e);
+                // Remove new container and rename old container back
+                if let Err(e) = self.docker.remove_container(&name, None).await {
+                    log::error!("Failed to remove newly created container '{}': {}", name, e);
+                } else {
+                    rename(&self.docker, &name_temp, &name).await;
+                    if let Err(e) = self.docker.start_container::<String>(&name, None).await {
+                        log::error!(
+                            "Failed to start old container after renaming it back: {}",
+                            e
+                        );
+                    }
+                }
+                self.event_channel.send(Event::ResumePolling);
+                return;
             }
 
             // Remove old container
             if !is_autoremove {
-                log::debug!("Removing old container '{}'", name_temp);
                 if let Err(e) = self.docker.remove_container(&name_temp, None).await {
                     log::error!("Failed to remove container '{}': {}", name_temp, e);
+                    self.event_channel.send(Event::ResumePolling);
                     return;
                 }
             }
@@ -797,6 +830,9 @@ impl GantryCrane {
                     }
                 }
             }
+
+            // Resume polling
+            self.event_channel.send(Event::ResumePolling);
         }
     }
 

@@ -40,6 +40,9 @@ pub enum Event {
     PublishMqttMessage(MqttMessage),
     SubscribeMqttTopic(String),
     MqttConnected,
+    ForcePoll,
+    SuspendPolling,
+    ResumePolling,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

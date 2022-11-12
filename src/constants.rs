@@ -32,6 +32,5 @@ pub const CONTAINER_REQUEST_PULL_RECREATE: &str = "pull_recreate";
 
 // These numbers should be more than sufficient for the usual home setup
 pub const BUFFER_SIZE_EVENT_CHANNEL: usize = 1024;
-pub const BUFFER_SIZE_POLL_CHANNEL: usize = 8;
 pub const BUFFER_SIZE_MQTT_RECV: usize = 384;
 pub const BUFFER_SIZE_MQTT_SEND: i32 = 384;
