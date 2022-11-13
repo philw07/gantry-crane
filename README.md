@@ -16,7 +16,7 @@
       <img src="https://deps.rs/repo/github/philw07/gantry-crane/status.svg?style=flat-square">
     </a>
     <a title="Code coverage" href="https://app.codecov.io/github/philw07/gantry-crane">
-      <img src="https://img.shields.io/codecov/c/gh/philw07/gantry-crane?style=flat-square">
+      <img src="https://img.shields.io/codecov/c/gh/philw07/gantry-crane?style=flat-square&logo=codecov">
     </a>
     <a title="License" href="https://github.com/philw07/gantry-crane/blob/master/LICENSE">
       <img src="https://img.shields.io/github/license/philw07/gantry-crane?style=flat-square">
