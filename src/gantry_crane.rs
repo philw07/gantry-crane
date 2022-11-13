@@ -13,7 +13,10 @@ use bollard::{
     },
     image::CreateImageOptions,
     network::ConnectNetworkOptions,
-    service::{ContainerInspectResponse, EventActor, EventMessageTypeEnum, ImageInspect},
+    service::{
+        ContainerInspectResponse, EventActor, EventMessageTypeEnum, ImageInspect,
+        MountPointTypeEnum,
+    },
     system::EventsOptions,
     Docker,
 };
@@ -677,6 +680,45 @@ impl GantryCrane {
             remove_equal!(HashMap, labels, volumes, exposed_ports);
 
             config.host_config = container_inspect.host_config;
+
+            // Take over anonymous volumes
+            if let Some(mounts) = container_inspect.mounts {
+                let binds = config.host_config.as_ref().and_then(|hc| hc.binds.as_ref());
+
+                // Find anonymous volumes
+                let anon_binds = mounts
+                    .iter()
+                    .filter(|mp| mp.typ == Some(MountPointTypeEnum::VOLUME))
+                    .filter_map(|mp| {
+                        Some(format!(
+                            "{}:{}",
+                            mp.name.as_deref()?,
+                            mp.destination.as_deref()?
+                        ))
+                    })
+                    .filter(|new_bind| {
+                        binds
+                            .and_then(|cur_binds| {
+                                cur_binds.iter().find(|cur_bind| cur_bind == &new_bind)
+                            })
+                            .is_none()
+                    })
+                    .collect::<Vec<_>>();
+
+                // Add binds for anonymous volumes
+                if !anon_binds.is_empty() {
+                    if let Some(host_config) = config.host_config.as_mut() {
+                        if host_config.binds.is_none() {
+                            host_config.binds = Some(Vec::new());
+                        }
+                        if let Some(binds) = host_config.binds.as_mut() {
+                            for bind in anon_binds {
+                                binds.push(bind);
+                            }
+                        }
+                    }
+                }
+            }
 
             // Only keep hostname in case it's not the default (first 12 chars of container ID)
             if let Some(id) = container_inspect.id.as_deref() {
