@@ -93,6 +93,46 @@ This might not be desirable, especially if you have a large amount of containers
 If you enable the `FILTER_BY_LABEL` setting, you can select which containers should be monitored by giving them the label `gantry-crane.enable=true`.
 This can be done via [docker](https://docs.docker.com/engine/reference/commandline/run/#set-metadata-on-container--l---label---label-file) or [docker-compose](https://docs.docker.com/compose/compose-file/compose-file-v3/#labels).
 
+## Monitoring containers via MQTT
+
+Information about each container is published in JSON format on a subtopic of the configured base topic.
+
+If the base topic is `gantry-crane` and a container is named `my_container`, the following is an example payload that would be published on the topic `gantry-crane/my_container`.
+
+```
+{
+  "name": "my_container",
+  "image": "philw07/gantry-crane:latest",
+  "state": "running",
+  "health": "unknown",
+  "cpu_percentage": 0.9,
+  "mem_percentage": 0.08,
+  "mem_mb": 12.51,
+  "net_rx_mb": 9.92,
+  "net_tx_mb": 9.55,
+  "block_rx_mb": 10.89,
+  "block_tx_mb": 8.31
+}
+```
+
+## Controlling containers via MQTT
+
+Containers can be controlled by publishing a non-retained message on the subtopic `set` for a container.
+
+For the example above, the topic would be `gantry-crane/my_container/set`.
+
+The following actions are available.
+
+| Payload | Description |
+| --- | --- |
+| `start` | Start the container. |
+| `stop` | Stop the container. |
+| `restart` | Restart the container. |
+| `pause` | Pause the container. |
+| `unpause` | Unpause the container. |
+| `recreate` | Recreate the container. The old container will be deleted and a new one created with the same configuration. |
+| `pull_recreate` | Pull the latest version of the image used for the container and then recreate the container using the new image. |
+
 ## Home Assistant integration
 
 When enabling the Home Assistant integration, by setting `HOMEASSISTANT_ACTIVE` to true, gantry-crane will publish MQTT discovery topics which Home Assistant will pick up automatically and add each container as a device with several entities (sensors and buttons).

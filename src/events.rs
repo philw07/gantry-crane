@@ -7,14 +7,13 @@ pub type EventReceiver = Receiver<Event>;
 
 pub struct EventChannel {
     #[allow(dead_code)]
-    rx: EventReceiver,
-    tx: EventSender,
+    pub tx: EventSender,
 }
 
 impl EventChannel {
     pub fn new() -> Self {
-        let (tx, rx) = broadcast::channel::<Event>(BUFFER_SIZE_EVENT_CHANNEL);
-        Self { rx, tx }
+        let (tx, _rx) = broadcast::channel::<Event>(BUFFER_SIZE_EVENT_CHANNEL);
+        Self { tx }
     }
 
     pub fn get_receiver(&self) -> EventReceiver {
@@ -40,6 +39,9 @@ pub enum Event {
     PublishMqttMessage(MqttMessage),
     SubscribeMqttTopic(String),
     MqttConnected,
+    ForcePoll,
+    SuspendPolling,
+    ResumePolling,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

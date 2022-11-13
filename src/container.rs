@@ -61,7 +61,7 @@ impl Container {
             settings,
             event_tx: event_channel.get_sender(),
 
-            is_host_networking: Self::is_host_networking(inspect).unwrap_or(false),
+            is_host_networking: Self::is_host_networking(inspect),
 
             name: stats.name.clone(),
             image: image.unwrap_or_else(|| UNKNOWN.into()),
@@ -249,15 +249,18 @@ impl Container {
         self.block_tx_mb = round(tx, PRECISION);
     }
 
-    fn is_host_networking(inspect: &ContainerInspectResponse) -> Option<bool> {
-        Some(
-            inspect
-                .host_config
-                .as_ref()?
-                .network_mode
-                .as_ref()?
-                .eq(DOCKER_NETWORK_MODE_HOST),
-        )
+    pub fn is_host_networking(inspect: &ContainerInspectResponse) -> bool {
+        (|| {
+            Some(
+                inspect
+                    .host_config
+                    .as_ref()?
+                    .network_mode
+                    .as_ref()?
+                    .eq(DOCKER_NETWORK_MODE_HOST),
+            )
+        })()
+        .unwrap_or(false)
     }
 }
 
@@ -902,18 +905,18 @@ mod tests {
         let mut inspect = ContainerInspectResponse {
             ..Default::default()
         };
-        assert!(Container::is_host_networking(&inspect).is_none());
+        assert_eq!(Container::is_host_networking(&inspect), false);
 
         inspect.host_config = Some(HostConfig {
             ..Default::default()
         });
-        assert!(Container::is_host_networking(&inspect).is_none());
+        assert_eq!(Container::is_host_networking(&inspect), false);
 
         inspect.host_config.as_mut().unwrap().network_mode = Some("bridge".into());
-        assert_eq!(Container::is_host_networking(&inspect), Some(false));
+        assert_eq!(Container::is_host_networking(&inspect), false);
 
         inspect.host_config.as_mut().unwrap().network_mode = Some("host".into());
-        assert_eq!(Container::is_host_networking(&inspect), Some(true));
+        assert_eq!(Container::is_host_networking(&inspect), true);
     }
 
     fn get_stats(name: &str) -> Stats {

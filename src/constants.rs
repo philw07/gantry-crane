@@ -22,8 +22,15 @@ pub const DOCKER_EVENT_ACTION_PAUSE: &str = "pause";
 pub const DOCKER_EVENT_ACTION_UNPAUSE: &str = "unpause";
 pub const DOCKER_NETWORK_MODE_HOST: &str = "host";
 
+pub const CONTAINER_REQUEST_START: &str = DOCKER_EVENT_ACTION_START;
+pub const CONTAINER_REQUEST_STOP: &str = DOCKER_EVENT_ACTION_STOP;
+pub const CONTAINER_REQUEST_RESTART: &str = DOCKER_EVENT_ACTION_RESTART;
+pub const CONTAINER_REQUEST_PAUSE: &str = DOCKER_EVENT_ACTION_PAUSE;
+pub const CONTAINER_REQUEST_UNPAUSE: &str = DOCKER_EVENT_ACTION_UNPAUSE;
+pub const CONTAINER_REQUEST_RECREATE: &str = "recreate";
+pub const CONTAINER_REQUEST_PULL_RECREATE: &str = "pull_recreate";
+
 // These numbers should be more than sufficient for the usual home setup
 pub const BUFFER_SIZE_EVENT_CHANNEL: usize = 1024;
-pub const BUFFER_SIZE_POLL_CHANNEL: usize = 8;
 pub const BUFFER_SIZE_MQTT_RECV: usize = 384;
 pub const BUFFER_SIZE_MQTT_SEND: i32 = 384;
