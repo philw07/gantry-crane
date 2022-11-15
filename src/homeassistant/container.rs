@@ -372,7 +372,7 @@ impl HomeAssistantContainer {
             unique_id: Some(format!("gc_{}_pause", self.device.name)),
         });
 
-        // Unause
+        // Unpause
         self.buttons.push(Button {
             name: "Unpause".into(),
             availability_topic: Some(format!(
@@ -391,6 +391,48 @@ impl HomeAssistantContainer {
             payload_press: "unpause".into(),
             retain: None,
             unique_id: Some(format!("gc_{}_unpause", self.device.name)),
+        });
+
+        // Recreate
+        self.buttons.push(Button {
+            name: "Recreate".into(),
+            availability_topic: Some(format!(
+                "{}/{}",
+                self.settings.mqtt.base_topic, AVAILABILITY_TOPIC
+            )),
+            command_topic: format!("{}/{}/set", self.settings.mqtt.base_topic, self.device.name),
+            device: self.device.clone(),
+            device_class: None,
+            enabled_by_default: Some(false),
+            entity_category: None,
+            icon: Some("mdi:autorenew".into()),
+            object_id: Some(format!("{}_recreate", self.device.name)),
+            payload_available: None,
+            payload_not_available: None,
+            payload_press: "recreate".into(),
+            retain: None,
+            unique_id: Some(format!("gc_{}_recreate", self.device.name)),
+        });
+
+        // Pull and recreate
+        self.buttons.push(Button {
+            name: "Pull and Recreate".into(),
+            availability_topic: Some(format!(
+                "{}/{}",
+                self.settings.mqtt.base_topic, AVAILABILITY_TOPIC
+            )),
+            command_topic: format!("{}/{}/set", self.settings.mqtt.base_topic, self.device.name),
+            device: self.device.clone(),
+            device_class: None,
+            enabled_by_default: Some(false),
+            entity_category: None,
+            icon: Some("mdi:update".into()),
+            object_id: Some(format!("{}_pull_recreate", self.device.name)),
+            payload_available: None,
+            payload_not_available: None,
+            payload_press: "pull_recreate".into(),
+            retain: None,
+            unique_id: Some(format!("gc_{}_pull_recreate", self.device.name)),
         });
 
         self
@@ -475,7 +517,7 @@ mod test {
 
         assert_eq!(container.device.name, "Container Name");
         assert_eq!(container.sensors.len(), 10);
-        assert_eq!(container.buttons.len(), 5);
+        assert_eq!(container.buttons.len(), 7);
     }
 
     #[test]
@@ -495,7 +537,7 @@ mod test {
         let recv = event_channel.get_receiver();
         assert_eq!(recv.len(), 0);
         container.publish();
-        assert_eq!(recv.len(), 15);
+        assert_eq!(recv.len(), 17);
     }
 
     #[tokio::test]
@@ -542,7 +584,7 @@ mod test {
         let recv = event_channel.get_receiver();
         assert_eq!(recv.len(), 0);
         container.unpublish();
-        assert_eq!(recv.len(), 15);
+        assert_eq!(recv.len(), 17);
     }
 
     #[tokio::test]
