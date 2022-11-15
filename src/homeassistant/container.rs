@@ -517,7 +517,7 @@ mod test {
 
         assert_eq!(container.device.name, "Container Name");
         assert_eq!(container.sensors.len(), 10);
-        assert_eq!(container.buttons.len(), 5);
+        assert_eq!(container.buttons.len(), 7);
     }
 
     #[test]
@@ -537,7 +537,7 @@ mod test {
         let recv = event_channel.get_receiver();
         assert_eq!(recv.len(), 0);
         container.publish();
-        assert_eq!(recv.len(), 15);
+        assert_eq!(recv.len(), 17);
     }
 
     #[tokio::test]
@@ -584,7 +584,7 @@ mod test {
         let recv = event_channel.get_receiver();
         assert_eq!(recv.len(), 0);
         container.unpublish();
-        assert_eq!(recv.len(), 15);
+        assert_eq!(recv.len(), 17);
     }
 
     #[tokio::test]
