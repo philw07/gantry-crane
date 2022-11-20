@@ -1,6 +1,6 @@
 use std::{
     borrow::Borrow,
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -684,9 +684,23 @@ impl GantryCrane {
             // Take over anonymous volumes
             if let Some(mounts) = container_inspect.mounts {
                 let binds = config.host_config.as_ref().and_then(|hc| {
-                    hc.binds
-                        .as_ref()
-                        .map(|binds| binds.iter().collect::<HashSet<_>>())
+                    hc.binds.as_ref().map(|binds| {
+                        binds
+                            .iter()
+                            .map(|bind| {
+                                if bind.matches(':').count() > 1 {
+                                    // Only keep source and destination path
+                                    bind.match_indices(':')
+                                        .nth(1)
+                                        .map(|(index, _)| bind.split_at(index).0)
+                                        .unwrap_or(bind)
+                                        .to_owned()
+                                } else {
+                                    bind.to_owned()
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                    })
                 });
                 let volumes = config.host_config.as_ref().and_then(|hc| {
                     hc.mounts.as_ref().map(|mounts| {
@@ -700,7 +714,7 @@ impl GantryCrane {
                                     mount.target.as_deref()?
                                 ))
                             })
-                            .collect::<HashSet<_>>()
+                            .collect::<Vec<_>>()
                     })
                 });
 
