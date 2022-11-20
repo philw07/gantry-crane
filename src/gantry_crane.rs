@@ -1,6 +1,6 @@
 use std::{
     borrow::Borrow,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -15,7 +15,7 @@ use bollard::{
     network::ConnectNetworkOptions,
     service::{
         ContainerInspectResponse, EventActor, EventMessageTypeEnum, ImageInspect,
-        MountPointTypeEnum,
+        MountPointTypeEnum, MountTypeEnum,
     },
     system::EventsOptions,
     Docker,
@@ -683,7 +683,26 @@ impl GantryCrane {
 
             // Take over anonymous volumes
             if let Some(mounts) = container_inspect.mounts {
-                let binds = config.host_config.as_ref().and_then(|hc| hc.binds.as_ref());
+                let binds = config.host_config.as_ref().and_then(|hc| {
+                    hc.binds
+                        .as_ref()
+                        .map(|binds| binds.iter().collect::<HashSet<_>>())
+                });
+                let volumes = config.host_config.as_ref().and_then(|hc| {
+                    hc.mounts.as_ref().map(|mounts| {
+                        mounts
+                            .iter()
+                            .filter(|mount| mount.typ == Some(MountTypeEnum::VOLUME))
+                            .filter_map(|mount| {
+                                Some(format!(
+                                    "{}:{}",
+                                    mount.source.as_deref()?,
+                                    mount.target.as_deref()?
+                                ))
+                            })
+                            .collect::<HashSet<_>>()
+                    })
+                });
 
                 // Find anonymous volumes
                 let anon_binds = mounts
@@ -698,10 +717,15 @@ impl GantryCrane {
                     })
                     .filter(|new_bind| {
                         binds
-                            .and_then(|cur_binds| {
-                                cur_binds.iter().find(|cur_bind| cur_bind == &new_bind)
-                            })
-                            .is_none()
+                            .as_ref()
+                            .map(|cur_binds| !cur_binds.contains(new_bind))
+                            .unwrap_or(true)
+                    })
+                    .filter(|new_bind| {
+                        volumes
+                            .as_ref()
+                            .map(|volumes| !volumes.contains(new_bind))
+                            .unwrap_or(true)
                     })
                     .collect::<Vec<_>>();
 
