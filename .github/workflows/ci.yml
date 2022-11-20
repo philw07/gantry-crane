@@ -59,7 +59,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: Swatinem/rust-cache@v2
       - name: Check formatting
         uses: actions-rs/cargo@v1
         with:
@@ -101,10 +100,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: Swatinem/rust-cache@v2
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: stable
-          components: llvm-tools-preview
+      - run: rustup component add llvm-tools-preview
       - name: Build
         uses: actions-rs/cargo@v1
         with:

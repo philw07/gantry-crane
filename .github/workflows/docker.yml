@@ -57,7 +57,7 @@ jobs:
             linux/arm64
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
-          cache-to: type=gha,mode=max
+          cache-to: type=gha
           cache-from: type=gha
       - name: Update README on docker hub
         uses: peter-evans/dockerhub-description@v3
