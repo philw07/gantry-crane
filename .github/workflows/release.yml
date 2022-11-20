@@ -19,8 +19,8 @@ jobs:
       - name: Check Cargo.toml version
         run: |
           pkg_version=$(awk -F ' = ' '$1 ~ /version/ { gsub(/["]/, "", $2); printf("%s",$2) }' Cargo.toml)
-          echo "GIT_TAG_VERSION=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-          echo "CARGO_PKG_VERSION=$pkg_version" >> $GITHUB_OUTPUT
+          echo "Git Tag: ${{ github.ref_name }}"
+          echo "Cargo.toml Version: $pkg_version"
           [[ $pkg_version == '${{ github.ref_name }}' ]]
       - name: Create GitHub Release
         id: release
