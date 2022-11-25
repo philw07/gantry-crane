@@ -15,7 +15,7 @@ categories = ["command-line-utilities"]
 anyhow = "1.0.66"
 argh = "0.1.9"
 bollard = "0.13.0"
-env_logger = "0.9.3"
+env_logger = "0.10.0"
 figment = { version = "0.10.8", features = ["env", "toml"] }
 futures = "0.3.25"
 log = "0.4.17"
