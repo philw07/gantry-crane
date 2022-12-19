@@ -7,10 +7,10 @@
 
   <div>
     <a title="CI status" href="https://github.com/philw07/gantry-crane/actions/workflows/ci.yml">
-      <img src="https://img.shields.io/github/workflow/status/philw07/gantry-crane/CI?label=CI&logo=github&style=flat-square">
+      <img src="https://img.shields.io/github/actions/workflow/status/philw07/gantry-crane/ci.yml?branch=master&label=CI&logo=github&style=flat-square">
     </a>
     <a title="Docker status" href="https://github.com/philw07/gantry-crane/actions/workflows/docker.yml">
-      <img src="https://img.shields.io/github/workflow/status/philw07/gantry-crane/Docker?label=Docker&logo=github&style=flat-square">
+      <img src="https://img.shields.io/github/actions/workflow/status/philw07/gantry-crane/docker.yml?branch=master&label=Docker&logo=github&style=flat-square">
     </a>
     <a title="Dependency status" href="https://deps.rs/repo/github/philw07/gantry-crane">
       <img src="https://deps.rs/repo/github/philw07/gantry-crane/status.svg?style=flat-square">
