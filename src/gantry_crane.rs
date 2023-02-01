@@ -811,7 +811,13 @@ impl GantryCrane {
             log::debug!("Creating new container '{}'", name);
             if let Err(e) = self
                 .docker
-                .create_container(Some(CreateContainerOptions { name: &name }), config)
+                .create_container(
+                    Some(CreateContainerOptions {
+                        name: &name,
+                        platform: None,
+                    }),
+                    config,
+                )
                 .await
             {
                 log::error!("Failed to create container '{}': {}", container_name, e);
