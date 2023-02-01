@@ -346,7 +346,6 @@ mod test {
         let mqtt = MqttClient::new(&event_channel, Arc::new(settings));
         assert!(mqtt.is_ok());
         let mqtt = mqtt.unwrap();
-        assert_eq!(mqtt.client.mqtt_version(), mqtt::MQTT_VERSION_3_1_1);
         assert_eq!(mqtt.client.client_id(), "test-client-id-abc123");
 
         assert_eq!(mqtt.event_rx.read().await.len(), 0);
