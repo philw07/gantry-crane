@@ -12,7 +12,7 @@ keywords = ["docker", "mqtt", "bridge", "home-assistant", "home-automation", "io
 categories = ["command-line-utilities"]
 
 [dependencies]
-anyhow = "1.0.69"
+anyhow = "1.0.70"
 argh = "0.1.10"
 bollard = "0.14.0"
 env_logger = "0.10.0"
