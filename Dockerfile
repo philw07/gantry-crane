@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM rust:1.68.1 as builder
+FROM --platform=$BUILDPLATFORM rust:1.68.2 as builder
 
 ARG PKG_CONFIG_ALLOW_CROSS=1
 
