@@ -17,7 +17,7 @@ argh = "0.1.10"
 bollard = "0.14.0"
 env_logger = "0.10.0"
 figment = { version = "0.10.10", features = ["env", "toml"] }
-futures = "0.3.27"
+futures = "0.3.28"
 log = "0.4.19"
 paho-mqtt = "0.12.1"
 serde = { version = "1.0.165", features = ["rc"] }
