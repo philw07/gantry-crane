@@ -24,7 +24,7 @@ pub struct Sensor {
     pub icon: Option<String>,
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub object_id: Option<String>,
+    pub default_entity_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payload_available: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -79,7 +79,7 @@ mod test {
             expire_after: None,
             force_update: None,
             icon: None,
-            object_id: None,
+            default_entity_id: None,
             payload_available: None,
             payload_not_available: None,
             state_class: None,
@@ -104,7 +104,7 @@ mod test {
             expire_after: None,
             force_update: None,
             icon: None,
-            object_id: None,
+            default_entity_id: None,
             payload_available: None,
             payload_not_available: None,
             state_class: None,

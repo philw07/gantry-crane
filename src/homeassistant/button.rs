@@ -23,7 +23,7 @@ pub struct Button {
     pub icon: Option<String>,
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub object_id: Option<String>,
+    pub default_entity_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payload_available: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -73,7 +73,7 @@ mod test {
             enabled_by_default: None,
             entity_category: None,
             icon: None,
-            object_id: None,
+            default_entity_id: None,
             payload_available: None,
             payload_not_available: None,
             payload_press: "test".into(),
@@ -96,7 +96,7 @@ mod test {
             enabled_by_default: None,
             entity_category: None,
             icon: None,
-            object_id: None,
+            default_entity_id: None,
             payload_available: None,
             payload_not_available: None,
             payload_press: "test".into(),
