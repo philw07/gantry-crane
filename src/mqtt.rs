@@ -38,7 +38,7 @@ impl From<mqtt::Message> for MqttMessage {
             topic: msg.topic().into(),
             payload: msg.payload_str().into(),
             retained: msg.retained(),
-            qos: msg.qos(),
+            qos: msg.qos() as i32,
         }
     }
 }
@@ -319,7 +319,7 @@ mod test {
         assert_eq!(paho_msg.topic(), topic);
         assert_eq!(paho_msg.payload_str(), payload);
         assert_eq!(paho_msg.retained(), retained);
-        assert_eq!(paho_msg.qos(), qos);
+        assert_eq!(paho_msg.qos() as i32, qos);
 
         // Paho to internal
         let paho_msg = mqtt::Message::new(topic, payload, qos);
