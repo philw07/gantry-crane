@@ -15,7 +15,7 @@ jobs:
     outputs:
       upload_url: ${{ steps.release.outputs.upload_url }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v6
       - name: Check Cargo.toml version
         run: |
           pkg_version=$(awk -F ' = ' '$1 ~ /version/ { gsub(/["]/, "", $2); printf("%s",$2) }' Cargo.toml)
@@ -56,7 +56,7 @@ jobs:
             target: x86_64-pc-windows-msvc
             cargo: cargo
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v6
     - name: Install Rust
       uses: dtolnay/rust-toolchain@master
       with:
