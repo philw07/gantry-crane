@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM rust:1.71.0 as builder
+FROM --platform=$BUILDPLATFORM rust:1.94.0 AS builder
 
 ARG PKG_CONFIG_ALLOW_CROSS=1
 
@@ -40,7 +40,7 @@ RUN cargo build --release --target "$(cat /tmp/target)" && \
     mv ./target/"$(cat /tmp/target)"/release/gantry-crane ./target/release/
 
 
-FROM debian:bullseye-slim
+FROM debian:trixie-slim
 
 WORKDIR /app
 
